@@ -1,0 +1,106 @@
+﻿{
+    "tested_at_utc":  "2026-11-18T22:25:50.6393508Z",
+    "test_url":  "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+    "single_stream_test":  {
+                               "format_id":  "139",
+                               "output_file_name":  "aqz-KE-bpKQ_139.m4a",
+                               "output_bytes":  3863745,
+                               "progress_events_count":  14,
+                               "sample_progress_events":  [
+                                                              {
+                                                                  "kind":  "download",
+                                                                  "status":  "downloading",
+                                                                  "downloaded":  1024,
+                                                                  "total":  3871021,
+                                                                  "total_estimate":  null,
+                                                                  "speed_bps":  21343.891704393547,
+                                                                  "eta_seconds":  181
+                                                              },
+                                                              {
+                                                                  "kind":  "download",
+                                                                  "status":  "downloading",
+                                                                  "downloaded":  3072,
+                                                                  "total":  3871021,
+                                                                  "total_estimate":  null,
+                                                                  "speed_bps":  62980.677410367331,
+                                                                  "eta_seconds":  61
+                                                              },
+                                                              {
+                                                                  "kind":  "download",
+                                                                  "status":  "downloading",
+                                                                  "downloaded":  7168,
+                                                                  "total":  3871021,
+                                                                  "total_estimate":  null,
+                                                                  "speed_bps":  145510.37224609905,
+                                                                  "eta_seconds":  26
+                                                              }
+                                                          ],
+                               "ffprobe_streams":  [
+                                                       {
+                                                           "index":  0,
+                                                           "codec_name":  "aac",
+                                                           "codec_type":  "audio"
+                                                       }
+                                                   ]
+                           },
+    "ffmpeg_merge_test":  {
+                              "video_format_id":  "396",
+                              "audio_format_id":  "139",
+                              "format_selector":  "396+139",
+                              "output_file_name":  "aqz-KE-bpKQ_merged.mp4",
+                              "output_bytes":  19273475,
+                              "postprocessor_events":  [
+                                                           {
+                                                               "kind":  "postprocess",
+                                                               "status":  "started",
+                                                               "postprocessor":  "Merger"
+                                                           },
+                                                           {
+                                                               "kind":  "postprocess",
+                                                               "status":  "finished",
+                                                               "postprocessor":  "Merger"
+                                                           },
+                                                           {
+                                                               "kind":  "postprocess",
+                                                               "status":  "started",
+                                                               "postprocessor":  "MoveFiles"
+                                                           },
+                                                           {
+                                                               "kind":  "postprocess",
+                                                               "status":  "finished",
+                                                               "postprocessor":  "MoveFiles"
+                                                           }
+                                                       ],
+                              "ffprobe_streams":  [
+                                                      {
+                                                          "index":  0,
+                                                          "codec_name":  "av1",
+                                                          "codec_type":  "video",
+                                                          "width":  640,
+                                                          "height":  360
+                                                      },
+                                                      {
+                                                          "index":  1,
+                                                          "codec_name":  "aac",
+                                                          "codec_type":  "audio"
+                                                      }
+                                                  ]
+                          },
+    "cancel_resume_test":  {
+                               "format_id":  "139",
+                               "canceled_at_stream_bytes":  514054,
+                               "part_file_name":  "aqz-KE-bpKQ_resume.m4a.part",
+                               "part_bytes_on_disk":  770621,
+                               "resume_log_line":  "[download] Resuming download at byte 770621",
+                               "first_resumed_bytes":  771645,
+                               "final_file_name":  "aqz-KE-bpKQ_resume.m4a",
+                               "final_bytes":  3863745,
+                               "ffprobe_streams":  [
+                                                       {
+                                                           "index":  0,
+                                                           "codec_name":  "aac",
+                                                           "codec_type":  "audio"
+                                                       }
+                                                   ]
+                           }
+}

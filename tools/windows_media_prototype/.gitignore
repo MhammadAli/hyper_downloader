@@ -1,0 +1,12 @@
+bin/
+output/*
+!output/.gitkeep
+*.exe
+*.dll
+*.zip
+*.mp4
+*.mkv
+*.webm
+*.m4a
+*.part
+*.ytdl

@@ -1,0 +1,201 @@
+﻿{
+    "inspected_at_utc":  "2026-11-18T22:23:18.1299079Z",
+    "playlist_id":  "PLa1F2ddGya_8u-HEvmfCVuS_OImW8HaLd",
+    "title":  "Blender Conference 2025",
+    "uploader":  "Blender",
+    "playlist_count":  84,
+    "enumerated_count":  5,
+    "entries":  [
+                    {
+                        "order_index":  0,
+                        "item_id":  "JXm0-ilIknE",
+                        "title":  "Keynote — Blender Conference 2025",
+                        "url":  "https://www.youtube.com/watch?v=JXm0-ilIknE",
+                        "duration_seconds":  1508,
+                        "thumbnail":  "https://i.ytimg.com/vi/JXm0-ilIknE/hqdefault.jpg?sqp=-oaymwE2CNACELwBSFXyq4qpAygIARUAAIhCGAFwAcABBvABAfgB_gmAAtAFigIMCAAQARhlIF0oUzAP\u0026rs=AOn4CLARKG1DpFIsdSqFZpX-EUnWbe1eEA",
+                        "format_inspection":  {
+                                                  "status":  "inspected",
+                                                  "title":  "Keynote — Blender Conference 2025",
+                                                  "duration_seconds":  1508,
+                                                  "thumbnail":  "https://i.ytimg.com/vi/JXm0-ilIknE/maxresdefault.jpg",
+                                                  "discovered_formats":  22,
+                                                  "exact_size_formats":  14,
+                                                  "approx_size_formats":  1,
+                                                  "available_resolutions":  [
+                                                                                "256x144",
+                                                                                "426x240",
+                                                                                "640x360",
+                                                                                "854x480",
+                                                                                "1280x720",
+                                                                                "1920x1080"
+                                                                            ],
+                                                  "video_codecs":  [
+                                                                       "avc1.4D400C",
+                                                                       "av01.0.00M.08",
+                                                                       "avc1.4D401E",
+                                                                       "avc1.42001E",
+                                                                       "vp09.00.21.08",
+                                                                       "vp9",
+                                                                       "av01.0.01M.08",
+                                                                       "av01.0.04M.08",
+                                                                       "avc1.4D401F",
+                                                                       "av01.0.05M.08",
+                                                                       "avc1.640028",
+                                                                       "av01.0.08M.08"
+                                                                   ],
+                                                  "audio_codecs":  [
+                                                                       "mp4a.40.5",
+                                                                       "mp4a.40.2",
+                                                                       "opus"
+                                                                   ],
+                                                  "sample_format_ids":  [
+                                                                            "233",
+                                                                            "234",
+                                                                            "139",
+                                                                            "140",
+                                                                            "251",
+                                                                            "269",
+                                                                            "160",
+                                                                            "394"
+                                                                        ]
+                                              }
+                    },
+                    {
+                        "order_index":  1,
+                        "item_id":  "hFzg41j68hg",
+                        "title":  "Compositing 5.0: Powerful yet Simple — Blender Conference 2025",
+                        "url":  "https://www.youtube.com/watch?v=hFzg41j68hg",
+                        "duration_seconds":  1248,
+                        "thumbnail":  "https://i.ytimg.com/vi/hFzg41j68hg/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==\u0026rs=AOn4CLCm44IEPlxlT5XURp2SeKlXRCjeBA",
+                        "format_inspection":  {
+                                                  "status":  "inspected",
+                                                  "title":  "Compositing 5.0: Powerful yet Simple — Blender Conference 2025",
+                                                  "duration_seconds":  1248,
+                                                  "thumbnail":  "https://i.ytimg.com/vi/hFzg41j68hg/maxresdefault.jpg",
+                                                  "discovered_formats":  22,
+                                                  "exact_size_formats":  14,
+                                                  "approx_size_formats":  1,
+                                                  "available_resolutions":  [
+                                                                                "256x144",
+                                                                                "426x240",
+                                                                                "640x360",
+                                                                                "854x480",
+                                                                                "1280x720",
+                                                                                "1920x1080"
+                                                                            ],
+                                                  "video_codecs":  [
+                                                                       "avc1.4D400C",
+                                                                       "av01.0.00M.08",
+                                                                       "avc1.4D401E",
+                                                                       "avc1.42001E",
+                                                                       "vp09.00.21.08",
+                                                                       "vp9",
+                                                                       "av01.0.01M.08",
+                                                                       "av01.0.04M.08",
+                                                                       "avc1.4D401F",
+                                                                       "av01.0.05M.08",
+                                                                       "avc1.640028",
+                                                                       "av01.0.08M.08"
+                                                                   ],
+                                                  "audio_codecs":  [
+                                                                       "mp4a.40.5",
+                                                                       "mp4a.40.2",
+                                                                       "opus"
+                                                                   ],
+                                                  "sample_format_ids":  [
+                                                                            "233",
+                                                                            "234",
+                                                                            "139",
+                                                                            "140",
+                                                                            "251",
+                                                                            "269",
+                                                                            "160",
+                                                                            "394"
+                                                                        ]
+                                              }
+                    },
+                    {
+                        "order_index":  2,
+                        "item_id":  "JP59Xan_54w",
+                        "title":  "Inside Blue Zoo\u0027s R\u0026D: Building a Digital-First Toolkit in Blender — Blender Conference 2025",
+                        "url":  "https://www.youtube.com/watch?v=JP59Xan_54w",
+                        "duration_seconds":  3002,
+                        "thumbnail":  "https://i.ytimg.com/vi/JP59Xan_54w/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==\u0026rs=AOn4CLBG4YAgSgKr0l-vTyAzS3Xp2FrJZA",
+                        "format_inspection":  {
+                                                  "status":  "inspected",
+                                                  "title":  "Inside Blue Zoo\u0027s R\u0026D: Building a Digital-First Toolkit in Blender — Blender Conference 2025",
+                                                  "duration_seconds":  3001,
+                                                  "thumbnail":  "https://i.ytimg.com/vi/JP59Xan_54w/maxresdefault.jpg",
+                                                  "discovered_formats":  45,
+                                                  "exact_size_formats":  28,
+                                                  "approx_size_formats":  1,
+                                                  "available_resolutions":  [
+                                                                                "256x144",
+                                                                                "426x240",
+                                                                                "640x360",
+                                                                                "854x480",
+                                                                                "1280x720",
+                                                                                "1920x1080"
+                                                                            ],
+                                                  "video_codecs":  [
+                                                                       "vp09.00.10.08",
+                                                                       "avc1.4D400C",
+                                                                       "vp09.00.11.08",
+                                                                       "vp9",
+                                                                       "av01.0.00M.08",
+                                                                       "avc1.4D4015",
+                                                                       "vp09.00.20.08",
+                                                                       "avc1.4D401E",
+                                                                       "avc1.42001E",
+                                                                       "vp09.00.21.08",
+                                                                       "av01.0.01M.08",
+                                                                       "avc1.4D401F",
+                                                                       "vp09.00.30.08",
+                                                                       "av01.0.04M.08",
+                                                                       "vp09.00.31.08",
+                                                                       "av01.0.05M.08",
+                                                                       "avc1.640028",
+                                                                       "vp09.00.40.08",
+                                                                       "av01.0.08M.08"
+                                                                   ],
+                                                  "audio_codecs":  [
+                                                                       "mp4a.40.5",
+                                                                       "opus",
+                                                                       "mp4a.40.2"
+                                                                   ],
+                                                  "sample_format_ids":  [
+                                                                            "233",
+                                                                            "234",
+                                                                            "139-drc",
+                                                                            "249-drc",
+                                                                            "250-drc",
+                                                                            "139",
+                                                                            "249",
+                                                                            "250"
+                                                                        ]
+                                              }
+                    },
+                    {
+                        "order_index":  3,
+                        "item_id":  "X7-TCnbjM_Y",
+                        "title":  "Slow Crafting VR: Hand-Drawn Textures and Worlds — Blender Conference 2025",
+                        "url":  "https://www.youtube.com/watch?v=X7-TCnbjM_Y",
+                        "duration_seconds":  1791,
+                        "thumbnail":  "https://i.ytimg.com/vi/X7-TCnbjM_Y/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==\u0026rs=AOn4CLDV9ptKq4vWNuQrKNjBMIdxZYsAeQ",
+                        "format_inspection":  {
+                                                  "status":  "pending_inspection"
+                                              }
+                    },
+                    {
+                        "order_index":  4,
+                        "item_id":  "IhgJ69uXnQU",
+                        "title":  "Blue Prince : Beyond The Doors — Blender Conference 2025",
+                        "url":  "https://www.youtube.com/watch?v=IhgJ69uXnQU",
+                        "duration_seconds":  1684,
+                        "thumbnail":  "https://i.ytimg.com/vi/IhgJ69uXnQU/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==\u0026rs=AOn4CLC_K1oAzNT9CClnltzDC9VYGjUPfA",
+                        "format_inspection":  {
+                                                  "status":  "pending_inspection"
+                                              }
+                    }
+                ]
+}
