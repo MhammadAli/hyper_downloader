@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:hyper_download_client/core/bridge/api.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:hyper_download_client/core/bridge/frb_generated.dart';
+import 'package:hyper_download_client/features/media_download/media_download_cubit.dart';
+import 'package:hyper_download_client/features/media_download/media_download_repository.dart';
+import 'package:hyper_download_client/features/media_download/media_download_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -9,31 +12,23 @@ Future<void> main() async {
 }
 
 class HyperDownloadApp extends StatelessWidget {
-  const HyperDownloadApp({super.key});
+  final MediaDownloadRepository? repository;
+
+  const HyperDownloadApp({super.key, this.repository});
 
   @override
   Widget build(BuildContext context) {
-    final pingResult = ping();
-    final versionResult = engineVersion();
-
     return MaterialApp(
       title: 'HyperDownload',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      home: Scaffold(
-        appBar: AppBar(title: const Text('HyperDownload — Phase 1')),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('Ping: $pingResult'),
-              const SizedBox(height: 8),
-              Text('Engine Version: $versionResult'),
-            ],
-          ),
-        ),
+      home: BlocProvider(
+        create: (_) => MediaDownloadCubit(
+          repository: repository ?? const FrbMediaDownloadRepository(),
+        )..initialize(),
+        child: const MediaDownloadScreen(),
       ),
     );
   }

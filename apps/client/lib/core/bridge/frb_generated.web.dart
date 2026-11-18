@@ -10,6 +10,7 @@ import 'api.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
+import 'models.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
@@ -21,10 +22,88 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   });
 
   @protected
+  AnyhowException dco_decode_AnyhowException(dynamic raw);
+
+  @protected
+  RustStreamSink<DownloadProgressEvent>
+  dco_decode_StreamSink_download_progress_event_Sse(dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
+  bool dco_decode_bool(dynamic raw);
+
+  @protected
+  double dco_decode_box_autoadd_f_64(dynamic raw);
+
+  @protected
+  StartDownloadRequest dco_decode_box_autoadd_start_download_request(
+    dynamic raw,
+  );
+
+  @protected
+  int dco_decode_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  BigInt dco_decode_box_autoadd_u_64(dynamic raw);
+
+  @protected
+  DiscoveredFormat dco_decode_discovered_format(dynamic raw);
+
+  @protected
+  DownloadFormatSelection dco_decode_download_format_selection(dynamic raw);
+
+  @protected
+  DownloadPhase dco_decode_download_phase(dynamic raw);
+
+  @protected
+  DownloadProgressEvent dco_decode_download_progress_event(dynamic raw);
+
+  @protected
+  DownloadSelectionKind dco_decode_download_selection_kind(dynamic raw);
+
+  @protected
+  double dco_decode_f_64(dynamic raw);
+
+  @protected
+  FileSizeAccuracy dco_decode_file_size_accuracy(dynamic raw);
+
+  @protected
+  int dco_decode_i_32(dynamic raw);
+
+  @protected
+  List<DiscoveredFormat> dco_decode_list_discovered_format(dynamic raw);
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  MediaInspection dco_decode_media_inspection(dynamic raw);
+
+  @protected
+  String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  double? dco_decode_opt_box_autoadd_f_64(dynamic raw);
+
+  @protected
+  int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw);
+
+  @protected
+  StartDownloadRequest dco_decode_start_download_request(dynamic raw);
+
+  @protected
+  StreamKind dco_decode_stream_kind(dynamic raw);
+
+  @protected
+  int dco_decode_u_32(dynamic raw);
+
+  @protected
+  BigInt dco_decode_u_64(dynamic raw);
 
   @protected
   int dco_decode_u_8(dynamic raw);
@@ -33,10 +112,100 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void dco_decode_unit(dynamic raw);
 
   @protected
+  AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
+
+  @protected
+  RustStreamSink<DownloadProgressEvent>
+  sse_decode_StreamSink_download_progress_event_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
+  bool sse_decode_bool(SseDeserializer deserializer);
+
+  @protected
+  double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
+
+  @protected
+  StartDownloadRequest sse_decode_box_autoadd_start_download_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
+  DiscoveredFormat sse_decode_discovered_format(SseDeserializer deserializer);
+
+  @protected
+  DownloadFormatSelection sse_decode_download_format_selection(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DownloadPhase sse_decode_download_phase(SseDeserializer deserializer);
+
+  @protected
+  DownloadProgressEvent sse_decode_download_progress_event(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DownloadSelectionKind sse_decode_download_selection_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  double sse_decode_f_64(SseDeserializer deserializer);
+
+  @protected
+  FileSizeAccuracy sse_decode_file_size_accuracy(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_i_32(SseDeserializer deserializer);
+
+  @protected
+  List<DiscoveredFormat> sse_decode_list_discovered_format(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  MediaInspection sse_decode_media_inspection(SseDeserializer deserializer);
+
+  @protected
+  String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer);
+
+  @protected
+  int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
+  StartDownloadRequest sse_decode_start_download_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  StreamKind sse_decode_stream_kind(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer);
+
+  @protected
+  BigInt sse_decode_u_64(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_8(SseDeserializer deserializer);
@@ -45,13 +214,82 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
-  int sse_decode_i_32(SseDeserializer deserializer);
+  void sse_encode_AnyhowException(
+    AnyhowException self,
+    SseSerializer serializer,
+  );
 
   @protected
-  bool sse_decode_bool(SseDeserializer deserializer);
+  void sse_encode_StreamSink_download_progress_event_Sse(
+    RustStreamSink<DownloadProgressEvent> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_start_download_request(
+    StartDownloadRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_discovered_format(
+    DiscoveredFormat self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_download_format_selection(
+    DownloadFormatSelection self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_download_phase(DownloadPhase self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_download_progress_event(
+    DownloadProgressEvent self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_download_selection_kind(
+    DownloadSelectionKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_f_64(double self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_file_size_accuracy(
+    FileSizeAccuracy self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_i_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_discovered_format(
+    List<DiscoveredFormat> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_prim_u_8_strict(
@@ -60,16 +298,43 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_media_inspection(
+    MediaInspection self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_start_download_request(
+    StartDownloadRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_stream_kind(StreamKind self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_u_64(BigInt self, SseSerializer serializer);
+
+  @protected
   void sse_encode_u_8(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_bool(bool self, SseSerializer serializer);
 }
 
 // Section: wire_class

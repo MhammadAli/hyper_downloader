@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'frb_generated.dart';
 import 'frb_generated.io.dart'
     if (dart.library.js_interop) 'frb_generated.web.dart';
+import 'models.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// Main entrypoint of the Rust API
@@ -66,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 1029279930;
+  int get rustContentHash => 2011741838;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -78,11 +79,21 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 }
 
 abstract class RustLibApi extends BaseApi {
+  Future<void> crateApiCancelDownload({required String jobId});
+
   String crateApiEngineVersion();
 
   Future<void> crateApiInitApp();
 
+  Future<MediaInspection> crateApiInspectMedia({required String url});
+
   String crateApiPing();
+
+  Future<String> crateApiResumeDownload({required String jobId});
+
+  Future<String> crateApiStartDownload({required StartDownloadRequest request});
+
+  Stream<DownloadProgressEvent> crateApiSubscribeDownloadProgress();
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -94,12 +105,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   });
 
   @override
+  Future<void> crateApiCancelDownload({required String jobId}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(jobId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 1,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiCancelDownloadConstMeta,
+        argValues: [jobId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiCancelDownloadConstMeta =>
+      const TaskConstMeta(debugName: "cancel_download", argNames: ["jobId"]);
+
+  @override
   String crateApiEngineVersion() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 1)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 2)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -124,7 +163,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 2,
+            funcId: 3,
             port: port_,
           );
         },
@@ -143,12 +182,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "init_app", argNames: []);
 
   @override
+  Future<MediaInspection> crateApiInspectMedia({required String url}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(url, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_media_inspection,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiInspectMediaConstMeta,
+        argValues: [url],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiInspectMediaConstMeta =>
+      const TaskConstMeta(debugName: "inspect_media", argNames: ["url"]);
+
+  @override
   String crateApiPing() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 3)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 5)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -164,6 +231,112 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiPingConstMeta =>
       const TaskConstMeta(debugName: "ping", argNames: []);
 
+  @override
+  Future<String> crateApiResumeDownload({required String jobId}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(jobId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 6,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiResumeDownloadConstMeta,
+        argValues: [jobId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiResumeDownloadConstMeta =>
+      const TaskConstMeta(debugName: "resume_download", argNames: ["jobId"]);
+
+  @override
+  Future<String> crateApiStartDownload({
+    required StartDownloadRequest request,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_start_download_request(request, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 7,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiStartDownloadConstMeta,
+        argValues: [request],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStartDownloadConstMeta =>
+      const TaskConstMeta(debugName: "start_download", argNames: ["request"]);
+
+  @override
+  Stream<DownloadProgressEvent> crateApiSubscribeDownloadProgress() {
+    final sink = RustStreamSink<DownloadProgressEvent>();
+    unawaited(
+      handler.executeNormal(
+        NormalTask(
+          callFfi: (port_) {
+            final serializer = SseSerializer(generalizedFrbRustBinding);
+            sse_encode_StreamSink_download_progress_event_Sse(sink, serializer);
+            pdeCallFfi(
+              generalizedFrbRustBinding,
+              serializer,
+              funcId: 8,
+              port: port_,
+            );
+          },
+          codec: SseCodec(
+            decodeSuccessData: sse_decode_unit,
+            decodeErrorData: sse_decode_String,
+          ),
+          constMeta: kCrateApiSubscribeDownloadProgressConstMeta,
+          argValues: [sink],
+          apiImpl: this,
+        ),
+      ),
+    );
+    return sink.stream;
+  }
+
+  TaskConstMeta get kCrateApiSubscribeDownloadProgressConstMeta =>
+      const TaskConstMeta(
+        debugName: "subscribe_download_progress",
+        argNames: ["sink"],
+      );
+
+  @protected
+  AnyhowException dco_decode_AnyhowException(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return AnyhowException(raw as String);
+  }
+
+  @protected
+  RustStreamSink<DownloadProgressEvent>
+  dco_decode_StreamSink_download_progress_event_Sse(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    throw UnimplementedError();
+  }
+
   @protected
   String dco_decode_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -171,9 +344,208 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool dco_decode_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as bool;
+  }
+
+  @protected
+  double dco_decode_box_autoadd_f_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as double;
+  }
+
+  @protected
+  StartDownloadRequest dco_decode_box_autoadd_start_download_request(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_start_download_request(raw);
+  }
+
+  @protected
+  int dco_decode_box_autoadd_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
+  BigInt dco_decode_box_autoadd_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_u_64(raw);
+  }
+
+  @protected
+  DiscoveredFormat dco_decode_discovered_format(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 13)
+      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    return DiscoveredFormat(
+      formatId: dco_decode_String(arr[0]),
+      container: dco_decode_String(arr[1]),
+      streamKind: dco_decode_stream_kind(arr[2]),
+      resolution: dco_decode_String(arr[3]),
+      width: dco_decode_opt_box_autoadd_u_32(arr[4]),
+      height: dco_decode_opt_box_autoadd_u_32(arr[5]),
+      fps: dco_decode_opt_box_autoadd_f_64(arr[6]),
+      vcodec: dco_decode_opt_String(arr[7]),
+      acodec: dco_decode_opt_String(arr[8]),
+      bitrateKbps: dco_decode_opt_box_autoadd_f_64(arr[9]),
+      fileSizeBytes: dco_decode_opt_box_autoadd_u_64(arr[10]),
+      sizeAccuracy: dco_decode_file_size_accuracy(arr[11]),
+      formatNote: dco_decode_opt_String(arr[12]),
+    );
+  }
+
+  @protected
+  DownloadFormatSelection dco_decode_download_format_selection(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return DownloadFormatSelection(
+      kind: dco_decode_download_selection_kind(arr[0]),
+      formatId: dco_decode_opt_String(arr[1]),
+      videoFormatId: dco_decode_opt_String(arr[2]),
+      audioFormatId: dco_decode_opt_String(arr[3]),
+      mergeContainer: dco_decode_opt_String(arr[4]),
+    );
+  }
+
+  @protected
+  DownloadPhase dco_decode_download_phase(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return DownloadPhase.values[raw as int];
+  }
+
+  @protected
+  DownloadProgressEvent dco_decode_download_progress_event(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    return DownloadProgressEvent(
+      jobId: dco_decode_String(arr[0]),
+      phase: dco_decode_download_phase(arr[1]),
+      downloadedBytes: dco_decode_u_64(arr[2]),
+      totalBytes: dco_decode_opt_box_autoadd_u_64(arr[3]),
+      isTotalEstimated: dco_decode_bool(arr[4]),
+      speedBytesPerSec: dco_decode_opt_box_autoadd_f_64(arr[5]),
+      etaSeconds: dco_decode_opt_box_autoadd_u_64(arr[6]),
+      outputPath: dco_decode_opt_String(arr[7]),
+      message: dco_decode_opt_String(arr[8]),
+    );
+  }
+
+  @protected
+  DownloadSelectionKind dco_decode_download_selection_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return DownloadSelectionKind.values[raw as int];
+  }
+
+  @protected
+  double dco_decode_f_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as double;
+  }
+
+  @protected
+  FileSizeAccuracy dco_decode_file_size_accuracy(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return FileSizeAccuracy.values[raw as int];
+  }
+
+  @protected
+  int dco_decode_i_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
+  List<DiscoveredFormat> dco_decode_list_discovered_format(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_discovered_format).toList();
+  }
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as Uint8List;
+  }
+
+  @protected
+  MediaInspection dco_decode_media_inspection(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return MediaInspection(
+      id: dco_decode_String(arr[0]),
+      title: dco_decode_String(arr[1]),
+      uploader: dco_decode_opt_String(arr[2]),
+      durationSeconds: dco_decode_opt_box_autoadd_f_64(arr[3]),
+      thumbnailUrl: dco_decode_opt_String(arr[4]),
+      webpageUrl: dco_decode_String(arr[5]),
+      providerName: dco_decode_String(arr[6]),
+      formats: dco_decode_list_discovered_format(arr[7]),
+    );
+  }
+
+  @protected
+  String? dco_decode_opt_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_String(raw);
+  }
+
+  @protected
+  double? dco_decode_opt_box_autoadd_f_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_f_64(raw);
+  }
+
+  @protected
+  int? dco_decode_opt_box_autoadd_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_u_32(raw);
+  }
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_u_64(raw);
+  }
+
+  @protected
+  StartDownloadRequest dco_decode_start_download_request(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return StartDownloadRequest(
+      url: dco_decode_String(arr[0]),
+      title: dco_decode_opt_String(arr[1]),
+      selection: dco_decode_download_format_selection(arr[2]),
+      outputDirectory: dco_decode_opt_String(arr[3]),
+    );
+  }
+
+  @protected
+  StreamKind dco_decode_stream_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return StreamKind.values[raw as int];
+  }
+
+  @protected
+  int dco_decode_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
+  BigInt dco_decode_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeU64(raw);
   }
 
   @protected
@@ -189,6 +561,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_String(deserializer);
+    return AnyhowException(inner);
+  }
+
+  @protected
+  RustStreamSink<DownloadProgressEvent>
+  sse_decode_StreamSink_download_progress_event_Sse(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    throw UnimplementedError('Unreachable ()');
+  }
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_list_prim_u_8_strict(deserializer);
@@ -196,10 +584,273 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool sse_decode_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint8() != 0;
+  }
+
+  @protected
+  double sse_decode_box_autoadd_f_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_f_64(deserializer));
+  }
+
+  @protected
+  StartDownloadRequest sse_decode_box_autoadd_start_download_request(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_start_download_request(deserializer));
+  }
+
+  @protected
+  int sse_decode_box_autoadd_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_u_32(deserializer));
+  }
+
+  @protected
+  BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_u_64(deserializer));
+  }
+
+  @protected
+  DiscoveredFormat sse_decode_discovered_format(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_formatId = sse_decode_String(deserializer);
+    var var_container = sse_decode_String(deserializer);
+    var var_streamKind = sse_decode_stream_kind(deserializer);
+    var var_resolution = sse_decode_String(deserializer);
+    var var_width = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_height = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_fps = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_vcodec = sse_decode_opt_String(deserializer);
+    var var_acodec = sse_decode_opt_String(deserializer);
+    var var_bitrateKbps = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_fileSizeBytes = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_sizeAccuracy = sse_decode_file_size_accuracy(deserializer);
+    var var_formatNote = sse_decode_opt_String(deserializer);
+    return DiscoveredFormat(
+      formatId: var_formatId,
+      container: var_container,
+      streamKind: var_streamKind,
+      resolution: var_resolution,
+      width: var_width,
+      height: var_height,
+      fps: var_fps,
+      vcodec: var_vcodec,
+      acodec: var_acodec,
+      bitrateKbps: var_bitrateKbps,
+      fileSizeBytes: var_fileSizeBytes,
+      sizeAccuracy: var_sizeAccuracy,
+      formatNote: var_formatNote,
+    );
+  }
+
+  @protected
+  DownloadFormatSelection sse_decode_download_format_selection(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_kind = sse_decode_download_selection_kind(deserializer);
+    var var_formatId = sse_decode_opt_String(deserializer);
+    var var_videoFormatId = sse_decode_opt_String(deserializer);
+    var var_audioFormatId = sse_decode_opt_String(deserializer);
+    var var_mergeContainer = sse_decode_opt_String(deserializer);
+    return DownloadFormatSelection(
+      kind: var_kind,
+      formatId: var_formatId,
+      videoFormatId: var_videoFormatId,
+      audioFormatId: var_audioFormatId,
+      mergeContainer: var_mergeContainer,
+    );
+  }
+
+  @protected
+  DownloadPhase sse_decode_download_phase(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return DownloadPhase.values[inner];
+  }
+
+  @protected
+  DownloadProgressEvent sse_decode_download_progress_event(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_jobId = sse_decode_String(deserializer);
+    var var_phase = sse_decode_download_phase(deserializer);
+    var var_downloadedBytes = sse_decode_u_64(deserializer);
+    var var_totalBytes = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_isTotalEstimated = sse_decode_bool(deserializer);
+    var var_speedBytesPerSec = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_etaSeconds = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_outputPath = sse_decode_opt_String(deserializer);
+    var var_message = sse_decode_opt_String(deserializer);
+    return DownloadProgressEvent(
+      jobId: var_jobId,
+      phase: var_phase,
+      downloadedBytes: var_downloadedBytes,
+      totalBytes: var_totalBytes,
+      isTotalEstimated: var_isTotalEstimated,
+      speedBytesPerSec: var_speedBytesPerSec,
+      etaSeconds: var_etaSeconds,
+      outputPath: var_outputPath,
+      message: var_message,
+    );
+  }
+
+  @protected
+  DownloadSelectionKind sse_decode_download_selection_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return DownloadSelectionKind.values[inner];
+  }
+
+  @protected
+  double sse_decode_f_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getFloat64();
+  }
+
+  @protected
+  FileSizeAccuracy sse_decode_file_size_accuracy(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return FileSizeAccuracy.values[inner];
+  }
+
+  @protected
+  int sse_decode_i_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getInt32();
+  }
+
+  @protected
+  List<DiscoveredFormat> sse_decode_list_discovered_format(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <DiscoveredFormat>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_discovered_format(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
     return deserializer.buffer.getUint8List(len_);
+  }
+
+  @protected
+  MediaInspection sse_decode_media_inspection(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_title = sse_decode_String(deserializer);
+    var var_uploader = sse_decode_opt_String(deserializer);
+    var var_durationSeconds = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_thumbnailUrl = sse_decode_opt_String(deserializer);
+    var var_webpageUrl = sse_decode_String(deserializer);
+    var var_providerName = sse_decode_String(deserializer);
+    var var_formats = sse_decode_list_discovered_format(deserializer);
+    return MediaInspection(
+      id: var_id,
+      title: var_title,
+      uploader: var_uploader,
+      durationSeconds: var_durationSeconds,
+      thumbnailUrl: var_thumbnailUrl,
+      webpageUrl: var_webpageUrl,
+      providerName: var_providerName,
+      formats: var_formats,
+    );
+  }
+
+  @protected
+  String? sse_decode_opt_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_String(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_f_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_u_32(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_u_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  StartDownloadRequest sse_decode_start_download_request(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_url = sse_decode_String(deserializer);
+    var var_title = sse_decode_opt_String(deserializer);
+    var var_selection = sse_decode_download_format_selection(deserializer);
+    var var_outputDirectory = sse_decode_opt_String(deserializer);
+    return StartDownloadRequest(
+      url: var_url,
+      title: var_title,
+      selection: var_selection,
+      outputDirectory: var_outputDirectory,
+    );
+  }
+
+  @protected
+  StreamKind sse_decode_stream_kind(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return StreamKind.values[inner];
+  }
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint32();
+  }
+
+  @protected
+  BigInt sse_decode_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getBigUint64();
   }
 
   @protected
@@ -214,21 +865,167 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  int sse_decode_i_32(SseDeserializer deserializer) {
+  void sse_encode_AnyhowException(
+    AnyhowException self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    return deserializer.buffer.getInt32();
+    sse_encode_String(self.message, serializer);
   }
 
   @protected
-  bool sse_decode_bool(SseDeserializer deserializer) {
+  void sse_encode_StreamSink_download_progress_event_Sse(
+    RustStreamSink<DownloadProgressEvent> self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    return deserializer.buffer.getUint8() != 0;
+    sse_encode_String(
+      self.setupAndSerialize(
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_download_progress_event,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+      ),
+      serializer,
+    );
   }
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_u_8_strict(utf8.encoder.convert(self), serializer);
+  }
+
+  @protected
+  void sse_encode_bool(bool self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint8(self ? 1 : 0);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_f_64(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_start_download_request(
+    StartDownloadRequest self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_start_download_request(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self, serializer);
+  }
+
+  @protected
+  void sse_encode_discovered_format(
+    DiscoveredFormat self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.formatId, serializer);
+    sse_encode_String(self.container, serializer);
+    sse_encode_stream_kind(self.streamKind, serializer);
+    sse_encode_String(self.resolution, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.width, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.height, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.fps, serializer);
+    sse_encode_opt_String(self.vcodec, serializer);
+    sse_encode_opt_String(self.acodec, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.bitrateKbps, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.fileSizeBytes, serializer);
+    sse_encode_file_size_accuracy(self.sizeAccuracy, serializer);
+    sse_encode_opt_String(self.formatNote, serializer);
+  }
+
+  @protected
+  void sse_encode_download_format_selection(
+    DownloadFormatSelection self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_download_selection_kind(self.kind, serializer);
+    sse_encode_opt_String(self.formatId, serializer);
+    sse_encode_opt_String(self.videoFormatId, serializer);
+    sse_encode_opt_String(self.audioFormatId, serializer);
+    sse_encode_opt_String(self.mergeContainer, serializer);
+  }
+
+  @protected
+  void sse_encode_download_phase(DownloadPhase self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_download_progress_event(
+    DownloadProgressEvent self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.jobId, serializer);
+    sse_encode_download_phase(self.phase, serializer);
+    sse_encode_u_64(self.downloadedBytes, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.totalBytes, serializer);
+    sse_encode_bool(self.isTotalEstimated, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.speedBytesPerSec, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.etaSeconds, serializer);
+    sse_encode_opt_String(self.outputPath, serializer);
+    sse_encode_opt_String(self.message, serializer);
+  }
+
+  @protected
+  void sse_encode_download_selection_kind(
+    DownloadSelectionKind self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_f_64(double self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putFloat64(self);
+  }
+
+  @protected
+  void sse_encode_file_size_accuracy(
+    FileSizeAccuracy self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_i_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putInt32(self);
+  }
+
+  @protected
+  void sse_encode_list_discovered_format(
+    List<DiscoveredFormat> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_discovered_format(item, serializer);
+    }
   }
 
   @protected
@@ -242,6 +1039,92 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_media_inspection(
+    MediaInspection self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.title, serializer);
+    sse_encode_opt_String(self.uploader, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.durationSeconds, serializer);
+    sse_encode_opt_String(self.thumbnailUrl, serializer);
+    sse_encode_String(self.webpageUrl, serializer);
+    sse_encode_String(self.providerName, serializer);
+    sse_encode_list_discovered_format(self.formats, serializer);
+  }
+
+  @protected
+  void sse_encode_opt_String(String? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_String(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_f_64(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_u_32(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_u_64(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_start_download_request(
+    StartDownloadRequest self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.url, serializer);
+    sse_encode_opt_String(self.title, serializer);
+    sse_encode_download_format_selection(self.selection, serializer);
+    sse_encode_opt_String(self.outputDirectory, serializer);
+  }
+
+  @protected
+  void sse_encode_stream_kind(StreamKind self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint32(self);
+  }
+
+  @protected
+  void sse_encode_u_64(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putBigUint64(self);
+  }
+
+  @protected
   void sse_encode_u_8(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self);
@@ -250,17 +1133,5 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_unit(void self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-  }
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putInt32(self);
-  }
-
-  @protected
-  void sse_encode_bool(bool self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putUint8(self ? 1 : 0);
   }
 }

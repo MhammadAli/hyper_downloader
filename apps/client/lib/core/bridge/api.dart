@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'frb_generated.dart';
+import 'models.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// Health check exposed over Flutter Rust Bridge.
@@ -11,3 +12,23 @@ String ping() => RustLib.instance.api.crateApiPing();
 
 /// Returns the Rust engine crate version.
 String engineVersion() => RustLib.instance.api.crateApiEngineVersion();
+
+/// Inspects a media URL using the local `yt-dlp` binary and returns metadata and formats.
+Future<MediaInspection> inspectMedia({required String url}) =>
+    RustLib.instance.api.crateApiInspectMedia(url: url);
+
+/// Starts a single download (or video+audio FFmpeg merge) job and returns its job ID.
+Future<String> startDownload({required StartDownloadRequest request}) =>
+    RustLib.instance.api.crateApiStartDownload(request: request);
+
+/// Cancels a running download job by terminating its full subprocess tree.
+Future<void> cancelDownload({required String jobId}) =>
+    RustLib.instance.api.crateApiCancelDownload(jobId: jobId);
+
+/// Resumes a canceled or failed download job via `yt-dlp --continue`.
+Future<String> resumeDownload({required String jobId}) =>
+    RustLib.instance.api.crateApiResumeDownload(jobId: jobId);
+
+/// Subscribes a Flutter stream sink to incremental Rust download progress events.
+Stream<DownloadProgressEvent> subscribeDownloadProgress() =>
+    RustLib.instance.api.crateApiSubscribeDownloadProgress();
