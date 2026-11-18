@@ -23,7 +23,7 @@ A live inspection of the repository (`f:\Documents\Flutter\hyper_downloader`) an
 | **Visual Studio 2022 C++ Build Tools** | ❌ Missing | Required by both Flutter Windows runner and Rust `x86_64-pc-windows-msvc` linker (`link.exe`) |
 | **LLVM / Clang (`libclang`)** | ❌ Missing | Required on Windows by `flutter_rust_bridge_codegen` / `ffigen` |
 | **Node.js** | ✅ Ready | `24.16.0.0` (`C:\Program Files\nodejs\node.exe`) — satisfies `yt-dlp` JS runtime (`>= 22.0.0`) |
-| **Python** | ⚠️ Action Needed (`3.13` for Phase 3) | `3.9.150.1013` found (`yt-dlp` requires `3.11+`; Chaquopy `17.0.0` with Android Python `3.13` requires matching host `buildPython 3.13.x`). Windows `yt-dlp.exe` bypasses host Python, but **Python `3.13`** must be installed before Phase 3. |
+| **Python** | ⚠️ Action Needed (`3.13` for Phase 3) | `3.9.150.1013` found (`yt-dlp` requires `3.11+`; Chaquopy `17.2.0` with Android Python `3.13` requires matching host `buildPython 3.13.x`). Windows `yt-dlp.exe` bypasses host Python, but **Python `3.13`** must be installed before Phase 3. |
 | **`yt-dlp.exe` / `deno.exe` / `ffmpeg.exe`** | ❌ Missing on `PATH` | Needed for Phase 2 Windows prototype (`Deno >= 2.3.0`, `QuickJS >= 2025-4-26`, or `Node.js >= 22.0.0`) |
 
 ---
@@ -60,7 +60,7 @@ cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
 ```
 
 ### Step 5: Install Host Python `3.13` (Required for Phase 3 Android Chaquopy `buildPython`)
-Chaquopy `17.0.0` targets Android Python `3.13` (recommended for 16 KB page alignment) and strictly requires `buildPython` to match the app's major.minor version (`3.13`):
+Chaquopy `17.2.0` targets Android Python `3.13` (recommended for 16 KB page alignment) and strictly requires `buildPython` to match the app's major.minor version (`3.13`):
 ```powershell
 winget install Python.Python.3.13
 ```
@@ -155,7 +155,7 @@ flutter run -d android
 ### Phased Rollout Sequence
 1. **Phase 1 — Minimal Flutter + Rust FRB v2 Integration:** Scaffold minimal `apps/client` + `rust/crates/engine_ffi` (`ping` / `engine_version` FFI call) and verify **Debug and Release** builds on **Windows Desktop** and **Android** (including 16 KB alignment check on `libengine_ffi.so`).
 2. **Phase 2 — Windows `yt-dlp` Prototype:** Build standalone `yt-dlp.exe` + JS runtime (`Node >= 22` / `Deno >= 2.3` / `QuickJS >= 2025-4-26`) + `ffmpeg.exe` prototype validating video inspection, dynamic format discovery, playlist inspection, `DownloadFormatChoice`, structured progress, pause/resume/cancel, and FFmpeg stream muxing.
-3. **Phase 3 — Android `yt-dlp` / Chaquopy Feasibility Prototype:** Validate Chaquopy `17.0.0` (Python `3.13` + host `buildPython 3.13`), `yt-dlp` + `yt-dlp-ejs`, `libqjs.so` + `libffmpeg.so` (`useLegacyPackaging = true`, `extractNativeLibs = true`, `filesDir/bin` symlinks, 16 KB alignment), JNI <-> Kotlin <-> Python progress hooks, child-process termination on cancel, and W^X-safe wheel updates.
+3. **Phase 3 — Android `yt-dlp` / Chaquopy Feasibility Prototype:** Validate Chaquopy `17.2.0` (Python `3.13` + host `buildPython 3.13`), `yt-dlp` + `yt-dlp-ejs`, `libqjs.so` + `libffmpeg.so` (`useLegacyPackaging = true`, `extractNativeLibs = true`, `filesDir/bin` symlinks, 16 KB alignment), JNI <-> Kotlin <-> Python progress hooks, child-process termination on cancel, and W^X-safe wheel updates.
 4. **Phase 4 — Shared Engine & Full Application:** Implement `media_models`, `persistence` (continuous checkpoints + `SIGKILL` recovery), `connection_manager`, `download_core` + `test_server`, `download_queue`, `HyperDownloadJobService` (UIDT), and all 7 Flutter Bloc UI screens.
 
 ### Per-Milestone Engineering Protocol

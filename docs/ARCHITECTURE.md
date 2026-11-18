@@ -244,7 +244,7 @@ HyperDownload uses **`flutter_rust_bridge` v2 (`2.13.0`)** with **Cargokit** as 
 - **Media Processing & Extractor Binaries (Windows & Android):**
   - FFmpeg is **not** statically linked into the Rust binary (avoiding GPL/LGPL static linking contamination).
   - **Windows:** Standalone `yt-dlp.exe`, an external JS runtime (**Deno `>= 2.3.0`**, **Node.js `>= 22.0.0`**, or **QuickJS `>= 2025-4-26`**), and `ffmpeg.exe`/`ffprobe.exe` live in `%LOCALAPPDATA%\HyperDownload\bin\` and are invoked out-of-process.
-  - **Android:** Chaquopy `17.0.0` (`>= 16.0.0`, MIT) embeds **Python `3.13`** + `yt-dlp` + `yt-dlp-ejs` + `certifi` (excluding GPL-2.0+ `mutagen`), with pure-Python wheel updates in `filesDir` (`sys.path[0]`, W^X safe). Cross-compiled 16 KB page-aligned PIE binaries `libqjs.so` (`QuickJS >= 2025-4-26`), `libffmpeg.so`, and `libffprobe.so` live in `jniLibs/<abi>/` with `android:extractNativeLibs="true"` and `packaging.jniLibs.useLegacyPackaging = true`, symlinked inside `<filesDir>/bin/` (`ffmpeg`, `ffprobe`, `qjs`) so `yt-dlp` finds them under SELinux/W^X constraints.
+  - **Android:** Chaquopy `17.2.0` (`>= 16.0.0`, MIT) embeds **Python `3.13`** + `yt-dlp` + `yt-dlp-ejs` + `certifi` (excluding GPL-2.0+ `mutagen`), with pure-Python wheel updates in `filesDir` (`sys.path[0]`, W^X safe). Cross-compiled 16 KB page-aligned PIE binaries `libqjs.so` (`QuickJS >= 2025-4-26`), `libffmpeg.so`, and `libffprobe.so` live in `jniLibs/<abi>/` with `android:extractNativeLibs="true"` and `packaging.jniLibs.useLegacyPackaging = true`, symlinked inside `<filesDir>/bin/` (`ffmpeg`, `ffprobe`, `qjs`) so `yt-dlp` finds them under SELinux/W^X constraints.
 
 ---
 

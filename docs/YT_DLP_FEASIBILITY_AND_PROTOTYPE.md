@@ -82,22 +82,22 @@ Unlike Windows, Android 10+ (API 29+) enforces strict `W^X` and SELinux `execute
 
 ### 3.1 Option Comparison: `youtubedl-android` vs. Chaquopy vs. Custom Kotlin `ProcessBuilder`
 
-| Evaluation Dimension | Option A: `youtubedl-android` (`0.18.1`) | Option B: Chaquopy `17.0.0` (`>= 16.0.0`) + `libqjs.so` + `libffmpeg.so` *(Recommended)* | Option C: Custom Kotlin `ProcessBuilder` |
+| Evaluation Dimension | Option A: `youtubedl-android` (`0.18.1`) | Option B: Chaquopy `17.2.0` (`>= 16.0.0`) + `libqjs.so` + `libffmpeg.so` *(Recommended)* | Option C: Custom Kotlin `ProcessBuilder` |
 | :--- | :--- | :--- | :--- |
-| **Maintenance Status** | Active fork by `JunkFood02` (Nov 2025, powers *Seal*) | Very active official Gradle plugin (`chaquo/chaquopy`; `17.0.0` released Dec 2025) | Self-maintained NDK build scripts |
+| **Maintenance Status** | Active fork by `JunkFood02` (Nov 2025, powers *Seal*) | Very active official Gradle plugin (`chaquo/chaquopy`; `17.2.0` released Oct 2026) | Self-maintained NDK build scripts |
 | **Wrapper License** | **GPL-3.0** (copyleft requirement on entire Android app) | **MIT** (free/unrestricted since v12.0.1+) | First-party Kotlin (Permissive) |
-| **Android Python Version** | Bundled CPython inside `.zip.so` | **Python `3.13`** (`3.13.9` in Chaquopy `17.0.0`, optimal for 16 KB page support) | Self-compiled CPython `3.13` `.so` |
+| **Android Python Version** | Bundled CPython inside `.zip.so` | **Python `3.13`** (`3.13.9+` in Chaquopy `17.x`, optimal for 16 KB page support) | Self-compiled CPython `3.13` `.so` |
 | **Host Build Prerequisite** | Prebuilt AARs from Maven Central | **Host Python `3.13.x` required** (`buildPython` must match app major.minor in Chaquopy 17+) | Full Android NDK CPython cross-build |
 | **EJS & `yt-dlp-ejs`** | Bundles `libqjs.so` + `yt-dlp` bundle | Explicitly installs **`yt-dlp` + `yt-dlp-ejs` + `certifi`** via Chaquopy `pip` (excluding GPL `mutagen`), plus bundled **`libqjs.so`** (`>= 2025-4-26`) | Same `libqjs.so` + pure-Python `yt-dlp` + `yt-dlp-ejs` |
-| **ARM64 & 16 KB Alignment** | `arm64-v8a` (+ `armeabi-v7a`, `x86`, `x86_64`) | `arm64-v8a` & `x86_64` — Chaquopy `16.0.0+` / `17.0.0` natively supports Android 15+ **16 KB page alignment** | Requires manual NDK r28+ rebuilds |
+| **ARM64 & 16 KB Alignment** | `arm64-v8a` (+ `armeabi-v7a`, `x86`, `x86_64`) | `arm64-v8a` & `x86_64` — Chaquopy `16.0.0+` / `17.2.0` natively supports Android 15+ **16 KB page alignment** | Requires manual NDK r28+ rebuilds |
 | **APK / AAB Size Impact** | Split/AAB (`arm64-v8a`): ~35–45 MB; Universal APK: ~120+ MB | Per-ABI split/AAB (`arm64-v8a`): Python `3.13` (~15–22 MB) + `libffmpeg.so`/`libffprobe.so` (~15–20 MB) + `libqjs.so` (~1–2 MB) + `yt-dlp` wheels (~3 MB) | ~35–45 MB per ABI split |
 | **Runtime Updates** | `updateYoutubeDL(STABLE / NIGHTLY)` | Pure-Python `yt-dlp` + `yt-dlp-ejs` wheels fetched to `filesDir` and prepended to `sys.path` (**W^X compliant**) | Pure-Python zipapp fetch to `filesDir` |
 
-### 3.2 Complete Chaquopy (`17.0.0` / Python `3.13`) Feasibility & Packaging Design
+### 3.2 Complete Chaquopy (`17.2.0` / Python `3.13`) Feasibility & Packaging Design
 
 1. **Android & Host Python Versions:**
-   - **Target Android Python Version:** **Python `3.13`** via **Chaquopy `17.0.0`** (minimum `16.0.0` for 16 KB page-size support; `17.0.0` updates runtime Python to `3.13.9`, `pip` to `25.3`, `certifi` to `2025.8.3`, fixes Flutter `settings.gradle` `plugins {}` compatibility, and requires `minSdk >= 24`).
-   - **Host Build Prerequisite (`buildPython`):** Chaquopy `17.0.0` requires `buildPython` on Windows to match the **exact major.minor (`3.13`)** of the Android Python version. Our host audit detected only **Python `3.9.150.1013`**; therefore, installing **Python `3.13.x`** on Windows is a mandatory prerequisite before Phase 3 Android builds:
+   - **Target Android Python Version:** **Python `3.13`** via **Chaquopy `17.2.0`** (minimum `16.0.0` for 16 KB page-size support; `17.0.0` added 16 KB page support + Flutter `settings.gradle` `plugins {}` compatibility + `minSdk >= 24`, and `17.2.0` updates `pip` to `26.2.2` and `certifi` to `2026.10.23`).
+   - **Host Build Prerequisite (`buildPython`):** Chaquopy `17.2.0` requires `buildPython` on Windows to match the **exact major.minor (`3.13`)** of the Android Python version. Our host audit detected only **Python `3.9.150.1013`**; therefore, installing **Python `3.13.x`** on Windows is a mandatory prerequisite before Phase 3 Android builds:
      ```kotlin
      chaquopy {
          defaultConfig {
@@ -142,7 +142,7 @@ Unlike Windows, Android 10+ (API 29+) enforces strict `W^X` and SELinux `execute
    - **Target ABIs:** `arm64-v8a` (production devices) and `x86_64` (Windows Android Emulator `35.5.10.0`), shipped via Android App Bundle (`.aab`) ABI splits.
    - **16 KB Alignment Verification:**
      - `libengine_ffi.so` compiled with NDK `28.2.13676358` / `29.0.14206865` automatically receives 16 KB ELF alignment (`-Wl,-z,max-page-size=16384` default in NDK r28+).
-     - Chaquopy `17.0.0` + Python `3.13` ships 16 KB page-aligned native libraries.
+     - Chaquopy `17.2.0` + Python `3.13` ships 16 KB page-aligned native libraries.
      - `libqjs.so`, `libffmpeg.so`, and `libffprobe.so` must be compiled with NDK r28+ (or `-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384`) and verified in CI/build checks via `llvm-objdump -p <file.so>` confirming all `LOAD` segments report `align 2**14` (16,384 bytes) or `2**16`.
 
 ---
@@ -155,7 +155,7 @@ Unlike Windows, Android 10+ (API 29+) enforces strict `W^X` and SELinux `execute
 | **`yt-dlp`** | Standalone `yt-dlp.exe` in `%LOCALAPPDATA%\HyperDownload\bin\` | Pure-Python wheel via Chaquopy `pip` | **The Unlicense** | Public domain; include notice in Open Source Licenses screen. |
 | **`yt-dlp-ejs`** | Bundled inside `yt-dlp.exe` | Pure-Python wheel via Chaquopy `pip` | **The Unlicense** (with MIT/ISC JS deps) | Include MIT/ISC attribution notices in Settings -> Open Source Licenses. |
 | **`mutagen` (Python)** | *(Note: PyInstaller official `yt-dlp.exe` bundles `mutagen`)* | **Explicitly Excluded** from Chaquopy `pip` | **GPL-2.0+** | **Important:** On Windows, either build a clean `yt-dlp` binary without `mutagen` or trigger user-initiated `yt-dlp.exe` download outside app installer + publish full GPLv2+ notice & source link. On Android, omitting `mutagen` keeps the Python runtime GPL-free. |
-| **Chaquopy** | N/A | Gradle plugin + runtime (`17.0.0`) | **MIT** | Include MIT license text in Notices. |
+| **Chaquopy** | N/A | Gradle plugin + runtime (`17.2.0`) | **MIT** | Include MIT license text in Notices. |
 | **CPython (`3.13`)** | Bundled inside `yt-dlp.exe` | Embedded by Chaquopy | **PSF-2.0** | Include PSF license notice. |
 | **`certifi`** | Bundled inside `yt-dlp.exe` | Chaquopy `pip` | **MPL-2.0** | Include MPL-2.0 notice. |
 | **QuickJS (`qjs` / `libqjs.so`)** | Optional `qjs.exe` (`>= 2025-4-26`) | `jniLibs/<abi>/libqjs.so` | **MIT** | Include MIT license text in Notices. |
@@ -185,7 +185,7 @@ Unlike Windows, Android 10+ (API 29+) enforces strict `W^X` and SELinux `execute
 
 - **Phase 1 — Minimal Flutter + Rust FRB v2 Verification:** Scaffold `apps/client` + `rust/crates/engine_ffi` with a trivial FRB round-trip (`ping` / `engine_version`), verifying **Debug and Release** builds on **Windows Desktop** and **Android** (including 16 KB alignment check on `libengine_ffi.so`).
 - **Phase 2 — Windows `yt-dlp` Prototype:** Validate standalone `yt-dlp.exe` + external JS runtime (`Node.js 24.16.0` / `Deno >= 2.3.0` / `QuickJS >= 2025-4-26`) + `ffmpeg.exe` across all 6 media extraction scenarios below.
-- **Phase 3 — Android `yt-dlp` / Chaquopy Feasibility Prototype:** Validate Chaquopy `17.0.0` (Python `3.13` + Windows host `buildPython 3.13`), `yt-dlp` + `yt-dlp-ejs`, `libqjs.so` + `libffmpeg.so` (`useLegacyPackaging = true`, `extractNativeLibs = true`, `llvm-objdump` 16 KB check), JNI <-> Kotlin <-> Python progress hooks, child-process termination on cancellation, and W^X-safe runtime wheel updates in `filesDir`.
+- **Phase 3 — Android `yt-dlp` / Chaquopy Feasibility Prototype:** Validate Chaquopy `17.2.0` (Python `3.13` + Windows host `buildPython 3.13`), `yt-dlp` + `yt-dlp-ejs`, `libqjs.so` + `libffmpeg.so` (`useLegacyPackaging = true`, `extractNativeLibs = true`, `llvm-objdump` 16 KB check), JNI <-> Kotlin <-> Python progress hooks, child-process termination on cancellation, and W^X-safe runtime wheel updates in `filesDir`.
 - **Phase 4 — Shared Engine & Full Application:** Implement `media_models`, `persistence` (continuous WAL checkpoints), `connection_manager`, `download_core` + `test_server`, `download_queue`, `HyperDownloadJobService` (UIDT + `SIGKILL` recovery), and all 7 Flutter Bloc UI screens.
 
 ### Prototype Verification Scenarios (Phases 2 & 3)
