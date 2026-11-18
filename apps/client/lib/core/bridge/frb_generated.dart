@@ -344,7 +344,60 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AudioQualityOption dco_decode_audio_quality_option(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return AudioQualityOption(
+      qualityLabel: dco_decode_String(arr[0]),
+      container: dco_decode_String(arr[1]),
+      bitrateKbps: dco_decode_opt_box_autoadd_f_64(arr[2]),
+      displaySize: dco_decode_String(arr[3]),
+      fileSizeBytes: dco_decode_opt_box_autoadd_u_64(arr[4]),
+      sizeAccuracy: dco_decode_file_size_accuracy(arr[5]),
+      formatId: dco_decode_String(arr[6]),
+      audioLanguage: dco_decode_opt_box_autoadd_audio_track_metadata(arr[7]),
+    );
+  }
+
+  @protected
+  AudioSelectionConfidence dco_decode_audio_selection_confidence(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return AudioSelectionConfidence.values[raw as int];
+  }
+
+  @protected
+  AudioTrackMetadata dco_decode_audio_track_metadata(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return AudioTrackMetadata(
+      language: dco_decode_opt_String(arr[0]),
+      languageDisplayName: dco_decode_opt_String(arr[1]),
+      isOriginal: dco_decode_opt_box_autoadd_bool(arr[2]),
+      isDefault: dco_decode_opt_box_autoadd_bool(arr[3]),
+      isAutoDub: dco_decode_opt_box_autoadd_bool(arr[4]),
+      selectionConfidence: dco_decode_audio_selection_confidence(arr[5]),
+      statusNote: dco_decode_String(arr[6]),
+    );
+  }
+
+  @protected
   bool dco_decode_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as bool;
+  }
+
+  @protected
+  AudioTrackMetadata dco_decode_box_autoadd_audio_track_metadata(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_audio_track_metadata(raw);
+  }
+
+  @protected
+  bool dco_decode_box_autoadd_bool(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as bool;
   }
@@ -457,9 +510,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FormatSelectionStrategy dco_decode_format_selection_strategy(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return FormatSelectionStrategy.values[raw as int];
+  }
+
+  @protected
   int dco_decode_i_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
+  }
+
+  @protected
+  List<AudioQualityOption> dco_decode_list_audio_quality_option(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_audio_quality_option).toList();
   }
 
   @protected
@@ -475,11 +540,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<VideoQualityOption> dco_decode_list_video_quality_option(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_video_quality_option).toList();
+  }
+
+  @protected
   MediaInspection dco_decode_media_inspection(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return MediaInspection(
       id: dco_decode_String(arr[0]),
       title: dco_decode_String(arr[1]),
@@ -488,7 +559,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       thumbnailUrl: dco_decode_opt_String(arr[4]),
       webpageUrl: dco_decode_String(arr[5]),
       providerName: dco_decode_String(arr[6]),
-      formats: dco_decode_list_discovered_format(arr[7]),
+      originalAudio: dco_decode_opt_box_autoadd_audio_track_metadata(arr[7]),
+      videoOptions: dco_decode_list_video_quality_option(arr[8]),
+      audioOptions: dco_decode_list_audio_quality_option(arr[9]),
+      formats: dco_decode_list_discovered_format(arr[10]),
     );
   }
 
@@ -496,6 +570,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   String? dco_decode_opt_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_String(raw);
+  }
+
+  @protected
+  AudioTrackMetadata? dco_decode_opt_box_autoadd_audio_track_metadata(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_audio_track_metadata(raw);
+  }
+
+  @protected
+  bool? dco_decode_opt_box_autoadd_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_bool(raw);
   }
 
   @protected
@@ -561,6 +651,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  VideoQualityOption dco_decode_video_quality_option(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    return VideoQualityOption(
+      resolution: dco_decode_String(arr[0]),
+      height: dco_decode_opt_box_autoadd_u_32(arr[1]),
+      fps: dco_decode_opt_box_autoadd_f_64(arr[2]),
+      container: dco_decode_String(arr[3]),
+      displaySize: dco_decode_String(arr[4]),
+      fileSizeBytes: dco_decode_opt_box_autoadd_u_64(arr[5]),
+      sizeAccuracy: dco_decode_file_size_accuracy(arr[6]),
+      videoFormatId: dco_decode_String(arr[7]),
+      selectedAudioFormatId: dco_decode_opt_String(arr[8]),
+      audioLanguage: dco_decode_opt_box_autoadd_audio_track_metadata(arr[9]),
+      formatSelectionStrategy: dco_decode_format_selection_strategy(arr[10]),
+    );
+  }
+
+  @protected
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_String(deserializer);
@@ -584,9 +695,84 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AudioQualityOption sse_decode_audio_quality_option(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_qualityLabel = sse_decode_String(deserializer);
+    var var_container = sse_decode_String(deserializer);
+    var var_bitrateKbps = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_displaySize = sse_decode_String(deserializer);
+    var var_fileSizeBytes = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_sizeAccuracy = sse_decode_file_size_accuracy(deserializer);
+    var var_formatId = sse_decode_String(deserializer);
+    var var_audioLanguage = sse_decode_opt_box_autoadd_audio_track_metadata(
+      deserializer,
+    );
+    return AudioQualityOption(
+      qualityLabel: var_qualityLabel,
+      container: var_container,
+      bitrateKbps: var_bitrateKbps,
+      displaySize: var_displaySize,
+      fileSizeBytes: var_fileSizeBytes,
+      sizeAccuracy: var_sizeAccuracy,
+      formatId: var_formatId,
+      audioLanguage: var_audioLanguage,
+    );
+  }
+
+  @protected
+  AudioSelectionConfidence sse_decode_audio_selection_confidence(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return AudioSelectionConfidence.values[inner];
+  }
+
+  @protected
+  AudioTrackMetadata sse_decode_audio_track_metadata(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_language = sse_decode_opt_String(deserializer);
+    var var_languageDisplayName = sse_decode_opt_String(deserializer);
+    var var_isOriginal = sse_decode_opt_box_autoadd_bool(deserializer);
+    var var_isDefault = sse_decode_opt_box_autoadd_bool(deserializer);
+    var var_isAutoDub = sse_decode_opt_box_autoadd_bool(deserializer);
+    var var_selectionConfidence = sse_decode_audio_selection_confidence(
+      deserializer,
+    );
+    var var_statusNote = sse_decode_String(deserializer);
+    return AudioTrackMetadata(
+      language: var_language,
+      languageDisplayName: var_languageDisplayName,
+      isOriginal: var_isOriginal,
+      isDefault: var_isDefault,
+      isAutoDub: var_isAutoDub,
+      selectionConfidence: var_selectionConfidence,
+      statusNote: var_statusNote,
+    );
+  }
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint8() != 0;
+  }
+
+  @protected
+  AudioTrackMetadata sse_decode_box_autoadd_audio_track_metadata(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_audio_track_metadata(deserializer));
+  }
+
+  @protected
+  bool sse_decode_box_autoadd_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bool(deserializer));
   }
 
   @protected
@@ -724,9 +910,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FormatSelectionStrategy sse_decode_format_selection_strategy(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return FormatSelectionStrategy.values[inner];
+  }
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getInt32();
+  }
+
+  @protected
+  List<AudioQualityOption> sse_decode_list_audio_quality_option(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <AudioQualityOption>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_audio_quality_option(deserializer));
+    }
+    return ans_;
   }
 
   @protected
@@ -751,6 +960,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<VideoQualityOption> sse_decode_list_video_quality_option(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <VideoQualityOption>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_video_quality_option(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   MediaInspection sse_decode_media_inspection(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_id = sse_decode_String(deserializer);
@@ -760,6 +983,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_thumbnailUrl = sse_decode_opt_String(deserializer);
     var var_webpageUrl = sse_decode_String(deserializer);
     var var_providerName = sse_decode_String(deserializer);
+    var var_originalAudio = sse_decode_opt_box_autoadd_audio_track_metadata(
+      deserializer,
+    );
+    var var_videoOptions = sse_decode_list_video_quality_option(deserializer);
+    var var_audioOptions = sse_decode_list_audio_quality_option(deserializer);
     var var_formats = sse_decode_list_discovered_format(deserializer);
     return MediaInspection(
       id: var_id,
@@ -769,6 +997,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       thumbnailUrl: var_thumbnailUrl,
       webpageUrl: var_webpageUrl,
       providerName: var_providerName,
+      originalAudio: var_originalAudio,
+      videoOptions: var_videoOptions,
+      audioOptions: var_audioOptions,
       formats: var_formats,
     );
   }
@@ -779,6 +1010,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_String(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  AudioTrackMetadata? sse_decode_opt_box_autoadd_audio_track_metadata(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_audio_track_metadata(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bool(deserializer));
     } else {
       return null;
     }
@@ -865,6 +1120,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  VideoQualityOption sse_decode_video_quality_option(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_resolution = sse_decode_String(deserializer);
+    var var_height = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_fps = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_container = sse_decode_String(deserializer);
+    var var_displaySize = sse_decode_String(deserializer);
+    var var_fileSizeBytes = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_sizeAccuracy = sse_decode_file_size_accuracy(deserializer);
+    var var_videoFormatId = sse_decode_String(deserializer);
+    var var_selectedAudioFormatId = sse_decode_opt_String(deserializer);
+    var var_audioLanguage = sse_decode_opt_box_autoadd_audio_track_metadata(
+      deserializer,
+    );
+    var var_formatSelectionStrategy = sse_decode_format_selection_strategy(
+      deserializer,
+    );
+    return VideoQualityOption(
+      resolution: var_resolution,
+      height: var_height,
+      fps: var_fps,
+      container: var_container,
+      displaySize: var_displaySize,
+      fileSizeBytes: var_fileSizeBytes,
+      sizeAccuracy: var_sizeAccuracy,
+      videoFormatId: var_videoFormatId,
+      selectedAudioFormatId: var_selectedAudioFormatId,
+      audioLanguage: var_audioLanguage,
+      formatSelectionStrategy: var_formatSelectionStrategy,
+    );
+  }
+
+  @protected
   void sse_encode_AnyhowException(
     AnyhowException self,
     SseSerializer serializer,
@@ -897,9 +1187,67 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_audio_quality_option(
+    AudioQualityOption self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.qualityLabel, serializer);
+    sse_encode_String(self.container, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.bitrateKbps, serializer);
+    sse_encode_String(self.displaySize, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.fileSizeBytes, serializer);
+    sse_encode_file_size_accuracy(self.sizeAccuracy, serializer);
+    sse_encode_String(self.formatId, serializer);
+    sse_encode_opt_box_autoadd_audio_track_metadata(
+      self.audioLanguage,
+      serializer,
+    );
+  }
+
+  @protected
+  void sse_encode_audio_selection_confidence(
+    AudioSelectionConfidence self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_audio_track_metadata(
+    AudioTrackMetadata self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_String(self.language, serializer);
+    sse_encode_opt_String(self.languageDisplayName, serializer);
+    sse_encode_opt_box_autoadd_bool(self.isOriginal, serializer);
+    sse_encode_opt_box_autoadd_bool(self.isDefault, serializer);
+    sse_encode_opt_box_autoadd_bool(self.isAutoDub, serializer);
+    sse_encode_audio_selection_confidence(self.selectionConfidence, serializer);
+    sse_encode_String(self.statusNote, serializer);
+  }
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self ? 1 : 0);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_audio_track_metadata(
+    AudioTrackMetadata self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_audio_track_metadata(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self, serializer);
   }
 
   @protected
@@ -1011,9 +1359,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_format_selection_strategy(
+    FormatSelectionStrategy self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_i_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putInt32(self);
+  }
+
+  @protected
+  void sse_encode_list_audio_quality_option(
+    List<AudioQualityOption> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_audio_quality_option(item, serializer);
+    }
   }
 
   @protected
@@ -1039,6 +1408,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_video_quality_option(
+    List<VideoQualityOption> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_video_quality_option(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_media_inspection(
     MediaInspection self,
     SseSerializer serializer,
@@ -1051,6 +1432,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.thumbnailUrl, serializer);
     sse_encode_String(self.webpageUrl, serializer);
     sse_encode_String(self.providerName, serializer);
+    sse_encode_opt_box_autoadd_audio_track_metadata(
+      self.originalAudio,
+      serializer,
+    );
+    sse_encode_list_video_quality_option(self.videoOptions, serializer);
+    sse_encode_list_audio_quality_option(self.audioOptions, serializer);
     sse_encode_list_discovered_format(self.formats, serializer);
   }
 
@@ -1061,6 +1448,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_String(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_audio_track_metadata(
+    AudioTrackMetadata? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_audio_track_metadata(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bool(self, serializer);
     }
   }
 
@@ -1133,5 +1543,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_unit(void self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+  }
+
+  @protected
+  void sse_encode_video_quality_option(
+    VideoQualityOption self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.resolution, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.height, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.fps, serializer);
+    sse_encode_String(self.container, serializer);
+    sse_encode_String(self.displaySize, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.fileSizeBytes, serializer);
+    sse_encode_file_size_accuracy(self.sizeAccuracy, serializer);
+    sse_encode_String(self.videoFormatId, serializer);
+    sse_encode_opt_String(self.selectedAudioFormatId, serializer);
+    sse_encode_opt_box_autoadd_audio_track_metadata(
+      self.audioLanguage,
+      serializer,
+    );
+    sse_encode_format_selection_strategy(
+      self.formatSelectionStrategy,
+      serializer,
+    );
   }
 }

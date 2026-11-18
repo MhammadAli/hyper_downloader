@@ -6,6 +6,7 @@ use crate::models::{
     DiscoveredFormat, DownloadPhase, DownloadProgressEvent, DownloadSelectionKind,
     FileSizeAccuracy, MediaInspection, StartDownloadRequest, StreamKind,
 };
+use crate::selection::{build_quality_options, extract_xtags_acont, RawFormatCandidate};
 use crate::win_job::ProcessTreeJob;
 use serde_json::Value;
 use std::ffi::{OsStr, OsString};
@@ -311,19 +312,23 @@ pub fn parse_yt_dlp_inspection_json(raw_json: &str) -> Result<MediaInspection, E
     let provider_name = json_non_empty_str(obj.get("extractor_key"))
         .or_else(|| json_non_empty_str(obj.get("extractor")))
         .unwrap_or_else(|| infer_provider_from_url(&webpage_url));
+    let video_language = json_non_empty_str(obj.get("language"));
 
-    let mut formats = Vec::with_capacity(raw_formats.len());
+    let mut candidates = Vec::with_capacity(raw_formats.len());
     for entry in raw_formats {
-        if let Some(parsed_fmt) = parse_discovered_format(entry) {
-            formats.push(parsed_fmt);
+        if let Some(candidate) = parse_discovered_candidate(entry) {
+            candidates.push(candidate);
         }
     }
 
-    if formats.is_empty() {
+    if candidates.is_empty() {
         return Err(EngineError::JsonParse(
             "No usable non-DRM, non-storyboard formats were found for this URL.".into(),
         ));
     }
+
+    let synthesized = build_quality_options(&candidates, video_language.as_deref());
+    let formats: Vec<DiscoveredFormat> = candidates.into_iter().map(|c| c.format).collect();
 
     Ok(MediaInspection {
         id,
@@ -333,6 +338,9 @@ pub fn parse_yt_dlp_inspection_json(raw_json: &str) -> Result<MediaInspection, E
         thumbnail_url,
         webpage_url,
         provider_name,
+        original_audio: synthesized.original_audio,
+        video_options: synthesized.video_options,
+        audio_options: synthesized.audio_options,
         formats,
     })
 }
@@ -364,7 +372,7 @@ fn infer_provider_from_url(url: &str) -> String {
         .unwrap_or_else(|| "Unknown".to_string())
 }
 
-fn parse_discovered_format(entry: &Value) -> Option<DiscoveredFormat> {
+fn parse_discovered_candidate(entry: &Value) -> Option<RawFormatCandidate> {
     let obj = entry.as_object()?;
 
     if is_drm_protected(obj.get("has_drm")) {
@@ -379,9 +387,12 @@ fn parse_discovered_format(entry: &Value) -> Option<DiscoveredFormat> {
 
     let vcodec = normalize_codec(obj.get("vcodec"));
     let acodec = normalize_codec(obj.get("acodec"));
+    let audio_ext = normalize_codec(obj.get("audio_ext"));
 
     let has_video = vcodec.is_some();
-    let has_audio = acodec.is_some();
+    let has_audio = acodec.is_some()
+        || (audio_ext.is_some()
+            && json_non_empty_str(obj.get("resolution")).as_deref() == Some("audio only"));
 
     // Exclude storyboards and container-only entries carrying neither audio nor video.
     if container.eq_ignore_ascii_case("mhtml") || (!has_video && !has_audio) {
@@ -410,24 +421,38 @@ fn parse_discovered_format(entry: &Value) -> Option<DiscoveredFormat> {
         });
 
     let fps = json_f64(obj.get("fps"));
-    let bitrate_kbps = json_f64(obj.get("tbr")).or_else(|| json_f64(obj.get("tbr_kbps")));
+    let bitrate_kbps = json_f64(obj.get("tbr"))
+        .or_else(|| json_f64(obj.get("tbr_kbps")))
+        .or_else(|| json_f64(obj.get("abr")));
 
     let (file_size_bytes, size_accuracy) = resolve_size_and_accuracy(obj);
+    let protocol = json_non_empty_str(obj.get("protocol"));
+    let language = json_non_empty_str(obj.get("language"));
+    let language_preference = json_i32(obj.get("language_preference"));
+    let source_preference = json_i32(obj.get("source_preference"));
+    let xtags_acont = extract_xtags_acont(json_non_empty_str(obj.get("url")).as_deref());
 
-    Some(DiscoveredFormat {
-        format_id,
-        container,
-        stream_kind,
-        resolution,
-        width,
-        height,
-        fps,
-        vcodec,
-        acodec,
-        bitrate_kbps,
-        file_size_bytes,
-        size_accuracy,
-        format_note,
+    Some(RawFormatCandidate {
+        format: DiscoveredFormat {
+            format_id,
+            container,
+            stream_kind,
+            resolution,
+            width,
+            height,
+            fps,
+            vcodec,
+            acodec,
+            bitrate_kbps,
+            file_size_bytes,
+            size_accuracy,
+            format_note,
+        },
+        protocol,
+        language,
+        language_preference,
+        source_preference,
+        xtags_acont,
     })
 }
 
@@ -494,6 +519,10 @@ fn json_u64(val: Option<&Value>) -> Option<u64> {
 
 fn json_u32(val: Option<&Value>) -> Option<u32> {
     json_u64(val).and_then(|v| u32::try_from(v).ok())
+}
+
+fn json_i32(val: Option<&Value>) -> Option<i32> {
+    val?.as_i64().and_then(|v| i32::try_from(v).ok())
 }
 
 fn json_f64(val: Option<&Value>) -> Option<f64> {
@@ -717,11 +746,14 @@ fn validate_format_id(value: &str, field_name: &str) -> Result<(), EngineError> 
 }
 
 fn configure_subprocess(cmd: &mut Command) {
+    // Ensure Python inside standalone `yt-dlp.exe` always emits valid UTF-8 paths
+    // on Windows pipes (critical for Arabic and non-ASCII video titles).
+    cmd.env("PYTHONUTF8", "1");
+    cmd.env("PYTHONIOENCODING", "utf-8");
     #[cfg(windows)]
     {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let _ = cmd;
 }
 
 fn shared_runtime() -> &'static tokio::runtime::Runtime {
@@ -791,12 +823,15 @@ pub struct DownloadManager {
 impl DownloadManager {
     pub fn global() -> &'static Arc<Self> {
         static INSTANCE: OnceLock<Arc<DownloadManager>> = OnceLock::new();
-        INSTANCE.get_or_init(|| {
-            let (tx, _) = broadcast::channel(256);
-            Arc::new(Self {
-                tx,
-                job: Mutex::new(None),
-            })
+        INSTANCE.get_or_init(Self::new_isolated)
+    }
+
+    /// Creates an independent `DownloadManager` instance (isolated for parallel integration tests).
+    pub(crate) fn new_isolated() -> Arc<Self> {
+        let (tx, _) = broadcast::channel(256);
+        Arc::new(Self {
+            tx,
+            job: Mutex::new(None),
         })
     }
 
@@ -979,8 +1014,15 @@ impl DownloadManager {
         cancel_requested: Arc<AtomicBool>,
         done_notify: Arc<Notify>,
     ) {
+        let path_record_file = std::env::temp_dir().join(format!("hyperdl_path_{job_id}.txt"));
+        let _ = tokio::fs::remove_file(&path_record_file).await;
+
         let mut cmd = Command::new(&paths.yt_dlp_exe);
-        cmd.args(&args);
+        cmd.arg("--no-quiet")
+            .arg("--print-to-file")
+            .arg("after_move:%(filepath)s")
+            .arg(&path_record_file)
+            .args(&args);
         cmd.stdin(std::process::Stdio::null());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -989,6 +1031,7 @@ impl DownloadManager {
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(err) => {
+                let _ = tokio::fs::remove_file(&path_record_file).await;
                 self.finish_job(&job_id, false, None).await;
                 let _ = self.tx.send(DownloadProgressEvent {
                     job_id,
@@ -1038,11 +1081,18 @@ impl DownloadManager {
         let mut last_phase = DownloadPhase::Analyzing;
 
         if let Some(out_stream) = stdout {
-            let mut reader = BufReader::new(out_stream).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
+            let mut reader = BufReader::new(out_stream);
+            let mut raw_buf = Vec::with_capacity(512);
+            loop {
+                raw_buf.clear();
+                match reader.read_until(b'\n', &mut raw_buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
                 if cancel_requested.load(Ordering::SeqCst) {
                     break;
                 }
+                let line = String::from_utf8_lossy(&raw_buf);
                 match parse_progress_line(&line) {
                     ParsedYtDlpLine::DownloadProgress {
                         status,
@@ -1104,6 +1154,18 @@ impl DownloadManager {
 
         let wait_result = child.wait().await;
         let stderr_text = stderr_task.await.unwrap_or_default();
+        let recorded_output_path = tokio::fs::read_to_string(&path_record_file)
+            .await
+            .ok()
+            .and_then(|content| {
+                content
+                    .lines()
+                    .rev()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                    .map(str::to_string)
+            });
+        let _ = tokio::fs::remove_file(&path_record_file).await;
 
         self.finish_job(&job_id, false, None).await;
 
@@ -1116,13 +1178,14 @@ impl DownloadManager {
                 is_total_estimated: last_estimated,
                 speed_bytes_per_sec: None,
                 eta_seconds: None,
-                output_path: detected_output_path,
+                output_path: recorded_output_path.or(detected_output_path),
                 message: Some("Download canceled. Partial data preserved for resume.".into()),
             }
         } else {
             match wait_result {
                 Ok(status) if status.success() => {
-                    let final_disk_bytes = match detected_output_path.as_deref() {
+                    let final_output_path = recorded_output_path.or(detected_output_path);
+                    let final_disk_bytes = match final_output_path.as_deref() {
                         Some(path) => tokio::fs::metadata(path).await.ok().map(|m| m.len()),
                         None => None,
                     };
@@ -1139,7 +1202,7 @@ impl DownloadManager {
                         },
                         speed_bytes_per_sec: None,
                         eta_seconds: Some(0),
-                        output_path: detected_output_path,
+                        output_path: final_output_path,
                         message: Some("Download completed.".into()),
                     }
                 }
@@ -1488,7 +1551,7 @@ mod tests {
             .clone();
 
         let temp_dir = TempDir::new().expect("temp download directory");
-        let manager = DownloadManager::global();
+        let manager = DownloadManager::new_isolated();
         let mut rx = manager.subscribe_broadcast();
 
         let job_id = manager
@@ -1571,5 +1634,400 @@ mod tests {
         let output_path = completed_output.expect("resumed download must emit Completed with path");
         let meta = std::fs::metadata(&output_path).expect("downloaded output file must exist");
         assert!(meta.len() > 0, "downloaded file must be non-empty");
+    }
+
+    #[test]
+    fn prefers_confirmed_original_audio_over_first_arabic_auto_dub_and_dubbed_muxed() {
+        let multi_audio_json = r#"{
+            "id": "multi-vid",
+            "title": "Multi Language Test",
+            "language": "en-US",
+            "extractor_key": "Youtube",
+            "formats": [
+                {
+                    "format_id": "140-0",
+                    "ext": "m4a",
+                    "vcodec": "none",
+                    "acodec": "mp4a.40.2",
+                    "tbr": 129.5,
+                    "filesize": 23429324,
+                    "language": "ar",
+                    "language_preference": -1,
+                    "protocol": "https",
+                    "format_note": "Arabic, medium",
+                    "url": "https://example.com/audio?xtags=acont%3Ddubbed-auto%3Alang%3Dar"
+                },
+                {
+                    "format_id": "140-15",
+                    "ext": "m4a",
+                    "vcodec": "none",
+                    "acodec": "mp4a.40.2",
+                    "tbr": 129.5,
+                    "filesize": 23429324,
+                    "language": "ru",
+                    "language_preference": -1,
+                    "protocol": "https",
+                    "format_note": "Russian, medium",
+                    "url": "https://example.com/audio?xtags=acont%3Ddubbed-auto%3Alang%3Dru"
+                },
+                {
+                    "format_id": "140-19",
+                    "ext": "m4a",
+                    "vcodec": "none",
+                    "acodec": "mp4a.40.2",
+                    "tbr": 129.5,
+                    "filesize": 23427071,
+                    "language": "en-US",
+                    "language_preference": 10,
+                    "protocol": "https",
+                    "format_note": "English (US) original (default), medium",
+                    "url": "https://example.com/audio?xtags=acont%3Doriginal%3Alang%3Den-US"
+                },
+                {
+                    "format_id": "251-19",
+                    "ext": "webm",
+                    "vcodec": "none",
+                    "acodec": "opus",
+                    "tbr": 132.0,
+                    "filesize": 23500000,
+                    "language": "en-US",
+                    "language_preference": 10,
+                    "protocol": "https",
+                    "format_note": "English (US) original (default), medium",
+                    "url": "https://example.com/audio?xtags=acont%3Doriginal%3Alang%3Den-US"
+                },
+                {
+                    "format_id": "18",
+                    "ext": "mp4",
+                    "vcodec": "avc1.42001E",
+                    "acodec": "mp4a.40.2",
+                    "width": 640,
+                    "height": 360,
+                    "fps": 25.0,
+                    "language": "ar",
+                    "language_preference": -1,
+                    "protocol": "https",
+                    "format_note": "360p"
+                },
+                {
+                    "format_id": "134",
+                    "ext": "mp4",
+                    "vcodec": "avc1.4D401E",
+                    "acodec": "none",
+                    "width": 640,
+                    "height": 360,
+                    "fps": 25.0,
+                    "filesize": 50000000,
+                    "protocol": "https"
+                },
+                {
+                    "format_id": "137",
+                    "ext": "mp4",
+                    "vcodec": "avc1.640028",
+                    "acodec": "none",
+                    "width": 1920,
+                    "height": 1080,
+                    "fps": 30.0,
+                    "filesize": 120000000,
+                    "protocol": "https"
+                }
+            ]
+        }"#;
+
+        let parsed =
+            parse_yt_dlp_inspection_json(multi_audio_json).expect("valid multi-audio JSON");
+        let orig = parsed
+            .original_audio
+            .as_ref()
+            .expect("original audio metadata must exist");
+        assert_eq!(orig.language.as_deref(), Some("en-US"));
+        assert_eq!(orig.is_original, Some(true));
+        assert_eq!(orig.is_auto_dub, Some(false));
+        assert_eq!(
+            orig.selection_confidence,
+            crate::models::AudioSelectionConfidence::ConfirmedOriginal
+        );
+        assert!(orig.status_note.contains("Original: English (US)"));
+
+        // Ensure unavailable 4K is not fabricated; only discovered 1080p and 360p exist.
+        assert_eq!(parsed.video_options.len(), 2);
+        assert_eq!(parsed.video_options[0].resolution, "1080p");
+        assert_eq!(parsed.video_options[1].resolution, "360p");
+
+        // Ensure dubbed combined format `18` (ar) is NOT chosen; `134+140-19` is paired instead.
+        let p360 = &parsed.video_options[1];
+        assert_eq!(
+            p360.format_selection_strategy,
+            crate::models::FormatSelectionStrategy::PairVideoAndAudioWithFfmpeg
+        );
+        assert_eq!(p360.video_format_id, "134");
+        assert_eq!(p360.selected_audio_format_id.as_deref(), Some("140-19"));
+
+        // Audio-only options must only contain original-lineage tracks, never dubbed ar/ru.
+        assert!(!parsed.audio_options.is_empty());
+        assert!(parsed
+            .audio_options
+            .iter()
+            .all(|o| o.format_id.ends_with("-19")));
+    }
+
+    #[test]
+    fn uses_combined_muxed_format_when_no_dub_mismatch_exists() {
+        let muxed_json = r#"{
+            "id": "combined-vid",
+            "title": "Combined Format Test",
+            "formats": [
+                {
+                    "format_id": "139",
+                    "ext": "m4a",
+                    "vcodec": "none",
+                    "acodec": "mp4a.40.5",
+                    "tbr": 48.8,
+                    "filesize": 3871021,
+                    "protocol": "https"
+                },
+                {
+                    "format_id": "18",
+                    "ext": "mp4",
+                    "vcodec": "avc1.42001E",
+                    "acodec": "mp4a.40.2",
+                    "width": 640,
+                    "height": 360,
+                    "fps": 30.0,
+                    "filesize": 12000000,
+                    "protocol": "https"
+                },
+                {
+                    "format_id": "134",
+                    "ext": "mp4",
+                    "vcodec": "avc1.4D401E",
+                    "acodec": "none",
+                    "width": 640,
+                    "height": 360,
+                    "fps": 30.0,
+                    "filesize": 10000000,
+                    "protocol": "https"
+                }
+            ]
+        }"#;
+
+        let parsed = parse_yt_dlp_inspection_json(muxed_json).expect("valid JSON");
+        assert_eq!(parsed.video_options.len(), 1);
+        let opt = &parsed.video_options[0];
+        assert_eq!(opt.resolution, "360p");
+        assert_eq!(
+            opt.format_selection_strategy,
+            crate::models::FormatSelectionStrategy::CombinedAudioVideo
+        );
+        assert_eq!(opt.video_format_id, "18");
+        assert_eq!(opt.selected_audio_format_id, None);
+
+        // Missing original marker must be reported honestly as SingleOrUnmarked.
+        let meta = parsed.original_audio.expect("audio metadata exists");
+        assert_eq!(
+            meta.selection_confidence,
+            crate::models::AudioSelectionConfidence::SingleOrUnmarked
+        );
+        assert_eq!(meta.is_original, None);
+    }
+
+    #[test]
+    fn missing_audio_track_produces_no_video_with_sound_options() {
+        let silent_json = r#"{
+            "id": "silent-vid",
+            "title": "Silent Video Only",
+            "formats": [
+                {
+                    "format_id": "137",
+                    "ext": "mp4",
+                    "vcodec": "avc1.640028",
+                    "acodec": "none",
+                    "width": 1920,
+                    "height": 1080,
+                    "fps": 30.0,
+                    "filesize": 50000000,
+                    "protocol": "https"
+                }
+            ]
+        }"#;
+
+        let parsed = parse_yt_dlp_inspection_json(silent_json).expect("valid silent video JSON");
+        assert!(parsed.video_options.is_empty());
+        assert!(parsed.audio_options.is_empty());
+        assert!(parsed.original_audio.is_none());
+    }
+
+    #[test]
+    fn ambiguous_multi_language_without_original_markers_does_not_claim_original() {
+        let ambiguous_json = r#"{
+            "id": "ambiguous-vid",
+            "title": "Unmarked Multi Language",
+            "formats": [
+                {
+                    "format_id": "140-ar",
+                    "ext": "m4a",
+                    "vcodec": "none",
+                    "acodec": "mp4a.40.2",
+                    "tbr": 128.0,
+                    "language": "ar",
+                    "language_preference": -1,
+                    "protocol": "https"
+                },
+                {
+                    "format_id": "140-en",
+                    "ext": "m4a",
+                    "vcodec": "none",
+                    "acodec": "mp4a.40.2",
+                    "tbr": 128.0,
+                    "language": "en",
+                    "language_preference": -1,
+                    "protocol": "https"
+                }
+            ]
+        }"#;
+
+        let parsed = parse_yt_dlp_inspection_json(ambiguous_json).expect("valid JSON");
+        let meta = parsed.original_audio.expect("audio meta present");
+        assert_eq!(meta.is_original, None);
+        assert_eq!(
+            meta.selection_confidence,
+            crate::models::AudioSelectionConfidence::AmbiguousOrUnknown
+        );
+        assert!(!meta.status_note.contains("Original:"));
+    }
+
+    #[tokio::test]
+    async fn live_multi_audio_video_selects_original_and_merges_with_ffmpeg() {
+        let url = "https://www.youtube.com/watch?v=TsT1ntGyj4Q";
+        let inspection = inspect_media_async(url)
+            .await
+            .expect("live multi-audio inspection must succeed");
+
+        let orig_audio = inspection
+            .original_audio
+            .as_ref()
+            .expect("original audio metadata must be extracted");
+        assert_eq!(orig_audio.language.as_deref(), Some("en-US"));
+        assert_eq!(orig_audio.is_original, Some(true));
+        assert_eq!(orig_audio.is_auto_dub, Some(false));
+        assert_eq!(
+            orig_audio.selection_confidence,
+            crate::models::AudioSelectionConfidence::ConfirmedOriginal
+        );
+
+        // No 4K option should be fabricated on this max-1080p video.
+        assert!(
+            !inspection
+                .video_options
+                .iter()
+                .any(|v| v.resolution.contains("2160")),
+            "4K must not be fabricated when max genuine resolution is 1080p"
+        );
+
+        // Audio-only options must all use the original `-19` / non-dub track, never Arabic dub `140-0`.
+        assert!(!inspection.audio_options.is_empty());
+        assert!(
+            !inspection
+                .audio_options
+                .iter()
+                .any(|a| a.format_id == "140-0"),
+            "Arabic auto-dub 140-0 must not be exposed in Audio Only"
+        );
+
+        // Pick the smallest paired MP4 option (e.g., 144p) and merge with FFmpeg.
+        let paired_opt = inspection
+            .video_options
+            .iter()
+            .filter(|v| {
+                v.format_selection_strategy
+                    == crate::models::FormatSelectionStrategy::PairVideoAndAudioWithFfmpeg
+                    && v.selected_audio_format_id.is_some()
+            })
+            .min_by_key(|v| v.height.unwrap_or(u32::MAX))
+            .expect("must find a paired video+original-audio option");
+
+        assert_ne!(
+            paired_opt.selected_audio_format_id.as_deref(),
+            Some("140-0"),
+            "must never select Arabic auto-dub 140-0"
+        );
+
+        let temp_dir = TempDir::new().expect("temp download directory");
+        let manager = DownloadManager::new_isolated();
+        let mut rx = manager.subscribe_broadcast();
+
+        let job_id = manager
+            .start_download(StartDownloadRequest {
+                url: url.to_string(),
+                title: Some(inspection.title.clone()),
+                selection: DownloadFormatSelection::video_and_audio(
+                    &paired_opt.video_format_id,
+                    paired_opt.selected_audio_format_id.as_ref().unwrap(),
+                    &paired_opt.container,
+                ),
+                output_directory: Some(temp_dir.path().to_string_lossy().into_owned()),
+            })
+            .await
+            .expect("start_download for paired multi-audio merge must succeed");
+
+        let mut saw_merging = false;
+        let mut output_path: Option<String> = None;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(180);
+        while tokio::time::Instant::now() < deadline {
+            let ev = tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv())
+                .await
+                .expect("timed out waiting for merge progress")
+                .expect("broadcast channel open");
+            if ev.job_id != job_id {
+                continue;
+            }
+            match ev.phase {
+                DownloadPhase::Merging => saw_merging = true,
+                DownloadPhase::Completed => {
+                    output_path = ev.output_path;
+                    break;
+                }
+                DownloadPhase::Failed => panic!("Merged download failed: {:?}", ev.message),
+                _ => {}
+            }
+        }
+
+        assert!(saw_merging, "FFmpeg merge phase should run");
+        let final_file = output_path.expect("merged MP4 path must be reported on completion");
+        assert!(std::path::Path::new(&final_file).is_file());
+
+        // Probe the actual output MP4 with `ffprobe.exe` to confirm both video and audio streams exist.
+        let paths = ToolPaths::resolve().expect("tool paths");
+        let ffprobe = paths.ffmpeg_dir().join(if cfg!(windows) {
+            "ffprobe.exe"
+        } else {
+            "ffprobe"
+        });
+        let probe = std::process::Command::new(ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=index,codec_type,codec_name",
+                "-of",
+                "json",
+                &final_file,
+            ])
+            .output()
+            .expect("ffprobe execution succeeds");
+        assert!(probe.status.success(), "ffprobe failed on merged MP4");
+        let probe_json: Value =
+            serde_json::from_slice(&probe.stdout).expect("valid ffprobe JSON output");
+        let streams = probe_json["streams"]
+            .as_array()
+            .expect("ffprobe streams array");
+        assert!(
+            streams.iter().any(|s| s["codec_type"] == "video"),
+            "final merged file must contain a video stream: {probe_json}"
+        );
+        assert!(
+            streams.iter().any(|s| s["codec_type"] == "audio"),
+            "final merged file must contain an audio stream: {probe_json}"
+        );
     }
 }

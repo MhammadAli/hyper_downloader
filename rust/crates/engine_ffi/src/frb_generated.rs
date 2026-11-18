@@ -351,6 +351,68 @@ impl SseDecode for String {
     }
 }
 
+impl SseDecode for crate::models::AudioQualityOption {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_qualityLabel = <String>::sse_decode(deserializer);
+        let mut var_container = <String>::sse_decode(deserializer);
+        let mut var_bitrateKbps = <Option<f64>>::sse_decode(deserializer);
+        let mut var_displaySize = <String>::sse_decode(deserializer);
+        let mut var_fileSizeBytes = <Option<u64>>::sse_decode(deserializer);
+        let mut var_sizeAccuracy = <crate::models::FileSizeAccuracy>::sse_decode(deserializer);
+        let mut var_formatId = <String>::sse_decode(deserializer);
+        let mut var_audioLanguage =
+            <Option<crate::models::AudioTrackMetadata>>::sse_decode(deserializer);
+        return crate::models::AudioQualityOption {
+            quality_label: var_qualityLabel,
+            container: var_container,
+            bitrate_kbps: var_bitrateKbps,
+            display_size: var_displaySize,
+            file_size_bytes: var_fileSizeBytes,
+            size_accuracy: var_sizeAccuracy,
+            format_id: var_formatId,
+            audio_language: var_audioLanguage,
+        };
+    }
+}
+
+impl SseDecode for crate::models::AudioSelectionConfidence {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::models::AudioSelectionConfidence::ConfirmedOriginal,
+            1 => crate::models::AudioSelectionConfidence::LikelyOriginal,
+            2 => crate::models::AudioSelectionConfidence::SingleOrUnmarked,
+            3 => crate::models::AudioSelectionConfidence::AmbiguousOrUnknown,
+            _ => unreachable!("Invalid variant for AudioSelectionConfidence: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::models::AudioTrackMetadata {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_language = <Option<String>>::sse_decode(deserializer);
+        let mut var_languageDisplayName = <Option<String>>::sse_decode(deserializer);
+        let mut var_isOriginal = <Option<bool>>::sse_decode(deserializer);
+        let mut var_isDefault = <Option<bool>>::sse_decode(deserializer);
+        let mut var_isAutoDub = <Option<bool>>::sse_decode(deserializer);
+        let mut var_selectionConfidence =
+            <crate::models::AudioSelectionConfidence>::sse_decode(deserializer);
+        let mut var_statusNote = <String>::sse_decode(deserializer);
+        return crate::models::AudioTrackMetadata {
+            language: var_language,
+            language_display_name: var_languageDisplayName,
+            is_original: var_isOriginal,
+            is_default: var_isDefault,
+            is_auto_dub: var_isAutoDub,
+            selection_confidence: var_selectionConfidence,
+            status_note: var_statusNote,
+        };
+    }
+}
+
 impl SseDecode for bool {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -484,10 +546,37 @@ impl SseDecode for crate::models::FileSizeAccuracy {
     }
 }
 
+impl SseDecode for crate::models::FormatSelectionStrategy {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::models::FormatSelectionStrategy::CombinedAudioVideo,
+            1 => crate::models::FormatSelectionStrategy::PairVideoAndAudioWithFfmpeg,
+            2 => crate::models::FormatSelectionStrategy::AudioOnlyStream,
+            _ => unreachable!("Invalid variant for FormatSelectionStrategy: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for i32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         deserializer.cursor.read_i32::<NativeEndian>().unwrap()
+    }
+}
+
+impl SseDecode for Vec<crate::models::AudioQualityOption> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::models::AudioQualityOption>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
     }
 }
 
@@ -515,6 +604,20 @@ impl SseDecode for Vec<u8> {
     }
 }
 
+impl SseDecode for Vec<crate::models::VideoQualityOption> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::models::VideoQualityOption>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for crate::models::MediaInspection {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -525,6 +628,12 @@ impl SseDecode for crate::models::MediaInspection {
         let mut var_thumbnailUrl = <Option<String>>::sse_decode(deserializer);
         let mut var_webpageUrl = <String>::sse_decode(deserializer);
         let mut var_providerName = <String>::sse_decode(deserializer);
+        let mut var_originalAudio =
+            <Option<crate::models::AudioTrackMetadata>>::sse_decode(deserializer);
+        let mut var_videoOptions =
+            <Vec<crate::models::VideoQualityOption>>::sse_decode(deserializer);
+        let mut var_audioOptions =
+            <Vec<crate::models::AudioQualityOption>>::sse_decode(deserializer);
         let mut var_formats = <Vec<crate::models::DiscoveredFormat>>::sse_decode(deserializer);
         return crate::models::MediaInspection {
             id: var_id,
@@ -534,6 +643,9 @@ impl SseDecode for crate::models::MediaInspection {
             thumbnail_url: var_thumbnailUrl,
             webpage_url: var_webpageUrl,
             provider_name: var_providerName,
+            original_audio: var_originalAudio,
+            video_options: var_videoOptions,
+            audio_options: var_audioOptions,
             formats: var_formats,
         };
     }
@@ -544,6 +656,30 @@ impl SseDecode for Option<String> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<String>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::models::AudioTrackMetadata> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::models::AudioTrackMetadata>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<bool> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<bool>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -638,6 +774,38 @@ impl SseDecode for () {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {}
 }
 
+impl SseDecode for crate::models::VideoQualityOption {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_resolution = <String>::sse_decode(deserializer);
+        let mut var_height = <Option<u32>>::sse_decode(deserializer);
+        let mut var_fps = <Option<f64>>::sse_decode(deserializer);
+        let mut var_container = <String>::sse_decode(deserializer);
+        let mut var_displaySize = <String>::sse_decode(deserializer);
+        let mut var_fileSizeBytes = <Option<u64>>::sse_decode(deserializer);
+        let mut var_sizeAccuracy = <crate::models::FileSizeAccuracy>::sse_decode(deserializer);
+        let mut var_videoFormatId = <String>::sse_decode(deserializer);
+        let mut var_selectedAudioFormatId = <Option<String>>::sse_decode(deserializer);
+        let mut var_audioLanguage =
+            <Option<crate::models::AudioTrackMetadata>>::sse_decode(deserializer);
+        let mut var_formatSelectionStrategy =
+            <crate::models::FormatSelectionStrategy>::sse_decode(deserializer);
+        return crate::models::VideoQualityOption {
+            resolution: var_resolution,
+            height: var_height,
+            fps: var_fps,
+            container: var_container,
+            display_size: var_displaySize,
+            file_size_bytes: var_fileSizeBytes,
+            size_accuracy: var_sizeAccuracy,
+            video_format_id: var_videoFormatId,
+            selected_audio_format_id: var_selectedAudioFormatId,
+            audio_language: var_audioLanguage,
+            format_selection_strategy: var_formatSelectionStrategy,
+        };
+    }
+}
+
 fn pde_ffi_dispatcher_primary_impl(
     func_id: i32,
     port: flutter_rust_bridge::for_generated::MessagePort,
@@ -673,6 +841,82 @@ fn pde_ffi_dispatcher_sync_impl(
 
 // Section: rust2dart
 
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::AudioQualityOption {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.quality_label.into_into_dart().into_dart(),
+            self.container.into_into_dart().into_dart(),
+            self.bitrate_kbps.into_into_dart().into_dart(),
+            self.display_size.into_into_dart().into_dart(),
+            self.file_size_bytes.into_into_dart().into_dart(),
+            self.size_accuracy.into_into_dart().into_dart(),
+            self.format_id.into_into_dart().into_dart(),
+            self.audio_language.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::AudioQualityOption
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::AudioQualityOption>
+    for crate::models::AudioQualityOption
+{
+    fn into_into_dart(self) -> crate::models::AudioQualityOption {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::AudioSelectionConfidence {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::ConfirmedOriginal => 0.into_dart(),
+            Self::LikelyOriginal => 1.into_dart(),
+            Self::SingleOrUnmarked => 2.into_dart(),
+            Self::AmbiguousOrUnknown => 3.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::AudioSelectionConfidence
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::AudioSelectionConfidence>
+    for crate::models::AudioSelectionConfidence
+{
+    fn into_into_dart(self) -> crate::models::AudioSelectionConfidence {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::AudioTrackMetadata {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.language.into_into_dart().into_dart(),
+            self.language_display_name.into_into_dart().into_dart(),
+            self.is_original.into_into_dart().into_dart(),
+            self.is_default.into_into_dart().into_dart(),
+            self.is_auto_dub.into_into_dart().into_dart(),
+            self.selection_confidence.into_into_dart().into_dart(),
+            self.status_note.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::AudioTrackMetadata
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::AudioTrackMetadata>
+    for crate::models::AudioTrackMetadata
+{
+    fn into_into_dart(self) -> crate::models::AudioTrackMetadata {
+        self
+    }
+}
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::models::DiscoveredFormat {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -823,6 +1067,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::models::FileSizeAccuracy>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::FormatSelectionStrategy {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::CombinedAudioVideo => 0.into_dart(),
+            Self::PairVideoAndAudioWithFfmpeg => 1.into_dart(),
+            Self::AudioOnlyStream => 2.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::FormatSelectionStrategy
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::FormatSelectionStrategy>
+    for crate::models::FormatSelectionStrategy
+{
+    fn into_into_dart(self) -> crate::models::FormatSelectionStrategy {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::models::MediaInspection {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -833,6 +1099,9 @@ impl flutter_rust_bridge::IntoDart for crate::models::MediaInspection {
             self.thumbnail_url.into_into_dart().into_dart(),
             self.webpage_url.into_into_dart().into_dart(),
             self.provider_name.into_into_dart().into_dart(),
+            self.original_audio.into_into_dart().into_dart(),
+            self.video_options.into_into_dart().into_dart(),
+            self.audio_options.into_into_dart().into_dart(),
             self.formats.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -889,6 +1158,36 @@ impl flutter_rust_bridge::IntoIntoDart<crate::models::StreamKind> for crate::mod
         self
     }
 }
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::VideoQualityOption {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.resolution.into_into_dart().into_dart(),
+            self.height.into_into_dart().into_dart(),
+            self.fps.into_into_dart().into_dart(),
+            self.container.into_into_dart().into_dart(),
+            self.display_size.into_into_dart().into_dart(),
+            self.file_size_bytes.into_into_dart().into_dart(),
+            self.size_accuracy.into_into_dart().into_dart(),
+            self.video_format_id.into_into_dart().into_dart(),
+            self.selected_audio_format_id.into_into_dart().into_dart(),
+            self.audio_language.into_into_dart().into_dart(),
+            self.format_selection_strategy.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::VideoQualityOption
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::VideoQualityOption>
+    for crate::models::VideoQualityOption
+{
+    fn into_into_dart(self) -> crate::models::VideoQualityOption {
+        self
+    }
+}
 
 impl SseEncode for flutter_rust_bridge::for_generated::anyhow::Error {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -913,6 +1212,54 @@ impl SseEncode for String {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Vec<u8>>::sse_encode(self.into_bytes(), serializer);
+    }
+}
+
+impl SseEncode for crate::models::AudioQualityOption {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.quality_label, serializer);
+        <String>::sse_encode(self.container, serializer);
+        <Option<f64>>::sse_encode(self.bitrate_kbps, serializer);
+        <String>::sse_encode(self.display_size, serializer);
+        <Option<u64>>::sse_encode(self.file_size_bytes, serializer);
+        <crate::models::FileSizeAccuracy>::sse_encode(self.size_accuracy, serializer);
+        <String>::sse_encode(self.format_id, serializer);
+        <Option<crate::models::AudioTrackMetadata>>::sse_encode(self.audio_language, serializer);
+    }
+}
+
+impl SseEncode for crate::models::AudioSelectionConfidence {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::models::AudioSelectionConfidence::ConfirmedOriginal => 0,
+                crate::models::AudioSelectionConfidence::LikelyOriginal => 1,
+                crate::models::AudioSelectionConfidence::SingleOrUnmarked => 2,
+                crate::models::AudioSelectionConfidence::AmbiguousOrUnknown => 3,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::models::AudioTrackMetadata {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<String>>::sse_encode(self.language, serializer);
+        <Option<String>>::sse_encode(self.language_display_name, serializer);
+        <Option<bool>>::sse_encode(self.is_original, serializer);
+        <Option<bool>>::sse_encode(self.is_default, serializer);
+        <Option<bool>>::sse_encode(self.is_auto_dub, serializer);
+        <crate::models::AudioSelectionConfidence>::sse_encode(
+            self.selection_confidence,
+            serializer,
+        );
+        <String>::sse_encode(self.status_note, serializer);
     }
 }
 
@@ -1028,10 +1375,37 @@ impl SseEncode for crate::models::FileSizeAccuracy {
     }
 }
 
+impl SseEncode for crate::models::FormatSelectionStrategy {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::models::FormatSelectionStrategy::CombinedAudioVideo => 0,
+                crate::models::FormatSelectionStrategy::PairVideoAndAudioWithFfmpeg => 1,
+                crate::models::FormatSelectionStrategy::AudioOnlyStream => 2,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for i32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         serializer.cursor.write_i32::<NativeEndian>(self).unwrap();
+    }
+}
+
+impl SseEncode for Vec<crate::models::AudioQualityOption> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::models::AudioQualityOption>::sse_encode(item, serializer);
+        }
     }
 }
 
@@ -1055,6 +1429,16 @@ impl SseEncode for Vec<u8> {
     }
 }
 
+impl SseEncode for Vec<crate::models::VideoQualityOption> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::models::VideoQualityOption>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for crate::models::MediaInspection {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -1065,6 +1449,9 @@ impl SseEncode for crate::models::MediaInspection {
         <Option<String>>::sse_encode(self.thumbnail_url, serializer);
         <String>::sse_encode(self.webpage_url, serializer);
         <String>::sse_encode(self.provider_name, serializer);
+        <Option<crate::models::AudioTrackMetadata>>::sse_encode(self.original_audio, serializer);
+        <Vec<crate::models::VideoQualityOption>>::sse_encode(self.video_options, serializer);
+        <Vec<crate::models::AudioQualityOption>>::sse_encode(self.audio_options, serializer);
         <Vec<crate::models::DiscoveredFormat>>::sse_encode(self.formats, serializer);
     }
 }
@@ -1075,6 +1462,26 @@ impl SseEncode for Option<String> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <String>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::models::AudioTrackMetadata> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::models::AudioTrackMetadata>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<bool> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <bool>::sse_encode(value, serializer);
         }
     }
 }
@@ -1160,6 +1567,26 @@ impl SseEncode for u8 {
 impl SseEncode for () {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {}
+}
+
+impl SseEncode for crate::models::VideoQualityOption {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.resolution, serializer);
+        <Option<u32>>::sse_encode(self.height, serializer);
+        <Option<f64>>::sse_encode(self.fps, serializer);
+        <String>::sse_encode(self.container, serializer);
+        <String>::sse_encode(self.display_size, serializer);
+        <Option<u64>>::sse_encode(self.file_size_bytes, serializer);
+        <crate::models::FileSizeAccuracy>::sse_encode(self.size_accuracy, serializer);
+        <String>::sse_encode(self.video_format_id, serializer);
+        <Option<String>>::sse_encode(self.selected_audio_format_id, serializer);
+        <Option<crate::models::AudioTrackMetadata>>::sse_encode(self.audio_language, serializer);
+        <crate::models::FormatSelectionStrategy>::sse_encode(
+            self.format_selection_strategy,
+            serializer,
+        );
+    }
 }
 
 #[cfg(not(target_family = "wasm"))]

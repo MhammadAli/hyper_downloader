@@ -12,51 +12,67 @@ class MockMediaDownloadRepository extends Mock
     implements MediaDownloadRepository {}
 
 MediaInspection _sampleInspection() {
+  const audioMeta = AudioTrackMetadata(
+    language: 'en-US',
+    languageDisplayName: 'English (US)',
+    isOriginal: true,
+    isDefault: true,
+    isAutoDub: false,
+    selectionConfidence: AudioSelectionConfidence.confirmedOriginal,
+    statusNote: 'Audio included automatically · Original: English (US)',
+  );
+
   return MediaInspection(
-    id: 'aqz-KE-bpKQ',
-    title: 'Big Buck Bunny 60fps 4K',
-    uploader: 'Blender',
-    durationSeconds: 635.0,
-    thumbnailUrl: 'https://i.ytimg.com/vi_webp/aqz-KE-bpKQ/maxresdefault.webp',
-    webpageUrl: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+    id: 'TsT1ntGyj4Q',
+    title: 'Sample Multi-Audio Video',
+    uploader: 'Test Creator',
+    durationSeconds: 1448.0,
+    thumbnailUrl: 'https://i.ytimg.com/vi/TsT1ntGyj4Q/hqdefault.jpg',
+    webpageUrl: 'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
     providerName: 'Youtube',
-    formats: [
-      DiscoveredFormat(
-        formatId: '139',
-        container: 'm4a',
-        streamKind: StreamKind.audioOnly,
-        resolution: 'audio only',
-        acodec: 'mp4a.40.5',
-        bitrateKbps: 48.8,
-        fileSizeBytes: BigInt.from(3871021),
+    originalAudio: audioMeta,
+    videoOptions: [
+      VideoQualityOption(
+        resolution: '1080p',
+        height: 1080,
+        fps: 50,
+        container: 'mp4',
+        displaySize: '142.34 MB (Exact)',
+        fileSizeBytes: BigInt.from(149254400),
         sizeAccuracy: FileSizeAccuracy.exact,
+        videoFormatId: '299',
+        selectedAudioFormatId: '140-19',
+        audioLanguage: audioMeta,
+        formatSelectionStrategy:
+            FormatSelectionStrategy.pairVideoAndAudioWithFfmpeg,
       ),
-      DiscoveredFormat(
-        formatId: '396',
-        container: 'mp4',
-        streamKind: StreamKind.videoOnly,
-        resolution: '640x360',
-        width: 640,
+      VideoQualityOption(
+        resolution: '360p',
         height: 360,
         fps: 30,
-        vcodec: 'av01.0.01M.08',
-        bitrateKbps: 200.5,
-        fileSizeBytes: BigInt.from(15400000),
+        container: 'mp4',
+        displaySize: '~24.50 MB (Estimated)',
+        fileSizeBytes: BigInt.from(25690112),
         sizeAccuracy: FileSizeAccuracy.estimated,
-      ),
-      DiscoveredFormat(
-        formatId: '18',
-        container: 'mp4',
-        streamKind: StreamKind.muxedAudioVideo,
-        resolution: '640x360',
-        width: 640,
-        height: 360,
-        fps: 30,
-        vcodec: 'avc1.42001E',
-        acodec: 'mp4a.40.2',
-        sizeAccuracy: FileSizeAccuracy.unknown,
+        videoFormatId: '18',
+        selectedAudioFormatId: null,
+        audioLanguage: audioMeta,
+        formatSelectionStrategy: FormatSelectionStrategy.combinedAudioVideo,
       ),
     ],
+    audioOptions: [
+      AudioQualityOption(
+        qualityLabel: 'Standard Quality (129 kbps)',
+        container: 'm4a',
+        bitrateKbps: 129.5,
+        displaySize: '22.34 MB (Exact)',
+        fileSizeBytes: BigInt.from(23427071),
+        sizeAccuracy: FileSizeAccuracy.exact,
+        formatId: '140-19',
+        audioLanguage: audioMeta,
+      ),
+    ],
+    formats: const [],
   );
 }
 
@@ -113,7 +129,7 @@ void main() {
     );
 
     blocTest<MediaDownloadCubit, MediaDownloadState>(
-      'analyzeUrl loads genuine formats and selects non-hardcoded defaults',
+      'analyzeUrl defaults to Video with Sound and selects top discovered option',
       build: () {
         when(
           () => repo.inspectMedia(any()),
@@ -121,31 +137,31 @@ void main() {
         return MediaDownloadCubit(repository: repo)..initialize();
       },
       act: (cubit) =>
-          cubit.analyzeUrl('https://www.youtube.com/watch?v=aqz-KE-bpKQ'),
+          cubit.analyzeUrl('https://www.youtube.com/watch?v=TsT1ntGyj4Q'),
       expect: () => [
         const MediaDownloadState(
           engineStatus: 'pong (v0.1.0)',
-          urlInput: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+          urlInput: 'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
         ),
         const MediaDownloadState(
           engineStatus: 'pong (v0.1.0)',
-          urlInput: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+          urlInput: 'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
           inspectionStatus: InspectionStatus.loading,
         ),
         MediaDownloadState(
           engineStatus: 'pong (v0.1.0)',
-          urlInput: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+          urlInput: 'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
           inspectionStatus: InspectionStatus.loaded,
           inspection: _sampleInspection(),
-          selectedSingleFormatId: '18',
-          selectedVideoFormatId: '396',
-          selectedAudioFormatId: '139',
+          mediaMode: DownloadMediaMode.videoWithSound,
+          selectedVideoFormatId: '299',
+          selectedAudioOptionFormatId: '140-19',
         ),
       ],
     );
 
     blocTest<MediaDownloadCubit, MediaDownloadState>(
-      'startDownload with merged video+audio emits progress through merging to completed',
+      'startDownload internally pairs paired option with FFmpeg and emits completion',
       build: () {
         when(
           () => repo.inspectMedia(any()),
@@ -154,8 +170,7 @@ void main() {
         return MediaDownloadCubit(repository: repo)..initialize();
       },
       act: (cubit) async {
-        await cubit.analyzeUrl('https://www.youtube.com/watch?v=aqz-KE-bpKQ');
-        cubit.setSelectionMode(SelectionMode.mergeVideoAudio);
+        await cubit.analyzeUrl('https://www.youtube.com/watch?v=TsT1ntGyj4Q');
         await cubit.startDownload();
 
         progressController.add(
@@ -163,8 +178,8 @@ void main() {
             jobId: 'job-42',
             phase: DownloadPhase.downloading,
             downloadedBytes: BigInt.from(1048576),
-            totalBytes: BigInt.from(15400000),
-            isTotalEstimated: true,
+            totalBytes: BigInt.from(149254400),
+            isTotalEstimated: false,
             speedBytesPerSec: 524288.0,
             etaSeconds: BigInt.from(27),
           ),
@@ -173,9 +188,9 @@ void main() {
           DownloadProgressEvent(
             jobId: 'job-42',
             phase: DownloadPhase.merging,
-            downloadedBytes: BigInt.from(15400000),
-            totalBytes: BigInt.from(15400000),
-            isTotalEstimated: true,
+            downloadedBytes: BigInt.from(149254400),
+            totalBytes: BigInt.from(149254400),
+            isTotalEstimated: false,
             message: 'Running Merger with FFmpeg...',
           ),
         );
@@ -183,10 +198,10 @@ void main() {
           DownloadProgressEvent(
             jobId: 'job-42',
             phase: DownloadPhase.completed,
-            downloadedBytes: BigInt.from(19273475),
-            totalBytes: BigInt.from(19273475),
+            downloadedBytes: BigInt.from(149254400),
+            totalBytes: BigInt.from(149254400),
             isTotalEstimated: false,
-            outputPath: r'C:\downloads\bunny.mp4',
+            outputPath: r'C:\downloads\video.mp4',
             message: 'Download completed.',
           ),
         );
@@ -196,15 +211,38 @@ void main() {
             verify(() => repo.startDownload(captureAny())).captured.single
                 as StartDownloadRequest;
         expect(captured.selection.kind, DownloadSelectionKind.videoAndAudio);
-        expect(captured.selection.videoFormatId, '396');
-        expect(captured.selection.audioFormatId, '139');
+        expect(captured.selection.videoFormatId, '299');
+        expect(captured.selection.audioFormatId, '140-19');
         expect(captured.selection.mergeContainer, 'mp4');
-
         expect(cubit.state.latestProgress?.phase, DownloadPhase.completed);
-        expect(
-          cubit.state.latestProgress?.outputPath,
-          r'C:\downloads\bunny.mp4',
-        );
+      },
+    );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'uses single format internally for combined options and Audio Only mode',
+      build: () {
+        when(
+          () => repo.inspectMedia(any()),
+        ).thenAnswer((_) async => _sampleInspection());
+        when(() => repo.startDownload(any())).thenAnswer((_) async => 'job-77');
+        return MediaDownloadCubit(repository: repo)..initialize();
+      },
+      act: (cubit) async {
+        await cubit.analyzeUrl('https://www.youtube.com/watch?v=TsT1ntGyj4Q');
+        cubit.selectVideoQuality('18');
+        await cubit.startDownload();
+        cubit.setMediaMode(DownloadMediaMode.audioOnly);
+        await cubit.startDownload();
+      },
+      verify: (_) {
+        final requests = verify(
+          () => repo.startDownload(captureAny()),
+        ).captured.cast<StartDownloadRequest>();
+        expect(requests.length, 2);
+        expect(requests[0].selection.kind, DownloadSelectionKind.single);
+        expect(requests[0].selection.formatId, '18');
+        expect(requests[1].selection.kind, DownloadSelectionKind.single);
+        expect(requests[1].selection.formatId, '140-19');
       },
     );
 
@@ -222,8 +260,7 @@ void main() {
         return MediaDownloadCubit(repository: repo)..initialize();
       },
       act: (cubit) async {
-        await cubit.analyzeUrl('https://www.youtube.com/watch?v=aqz-KE-bpKQ');
-        cubit.selectSingleFormat('139');
+        await cubit.analyzeUrl('https://www.youtube.com/watch?v=TsT1ntGyj4Q');
         await cubit.startDownload();
 
         progressController.add(
@@ -231,7 +268,7 @@ void main() {
             jobId: 'job-99',
             phase: DownloadPhase.downloading,
             downloadedBytes: BigInt.from(512000),
-            totalBytes: BigInt.from(3871021),
+            totalBytes: BigInt.from(149254400),
             isTotalEstimated: false,
             speedBytesPerSec: 256000.0,
             etaSeconds: BigInt.from(13),
@@ -246,7 +283,7 @@ void main() {
             jobId: 'job-99',
             phase: DownloadPhase.canceled,
             downloadedBytes: BigInt.from(512000),
-            totalBytes: BigInt.from(3871021),
+            totalBytes: BigInt.from(149254400),
             isTotalEstimated: false,
             message: 'Download canceled.',
           ),

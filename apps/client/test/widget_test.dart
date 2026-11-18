@@ -18,6 +18,7 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
   String? lastCanceledJobId;
   String? lastResumedJobId;
   bool shouldFailInspection = false;
+  bool returnMissingAudio = false;
 
   @override
   String ping() => 'pong';
@@ -30,51 +31,84 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
     if (shouldFailInspection) {
       throw Exception('Simulated extraction failure');
     }
+
+    if (returnMissingAudio) {
+      return MediaInspection(
+        id: 'silent-1',
+        title: 'Silent Test Video',
+        uploader: 'Creator',
+        durationSeconds: 120.0,
+        thumbnailUrl: null,
+        webpageUrl: url,
+        providerName: 'Youtube',
+        originalAudio: null,
+        videoOptions: const [],
+        audioOptions: const [],
+        formats: const [],
+      );
+    }
+
+    const audioMeta = AudioTrackMetadata(
+      language: 'en-US',
+      languageDisplayName: 'English (US)',
+      isOriginal: true,
+      isDefault: true,
+      isAutoDub: false,
+      selectionConfidence: AudioSelectionConfidence.confirmedOriginal,
+      statusNote: 'Audio included automatically · Original: English (US)',
+    );
+
     return MediaInspection(
-      id: 'aqz-KE-bpKQ',
-      title: 'Big Buck Bunny 60fps 4K',
-      uploader: 'Blender',
-      durationSeconds: 635.0,
+      id: 'TsT1ntGyj4Q',
+      title: 'Multi-Audio Test Presentation',
+      uploader: 'Channel Author',
+      durationSeconds: 1448.0,
       thumbnailUrl: null,
       webpageUrl: url,
       providerName: 'Youtube',
-      formats: [
-        DiscoveredFormat(
-          formatId: '139',
-          container: 'm4a',
-          streamKind: StreamKind.audioOnly,
-          resolution: 'audio only',
-          acodec: 'mp4a.40.5',
-          bitrateKbps: 48.8,
-          fileSizeBytes: BigInt.from(3871021),
+      originalAudio: audioMeta,
+      videoOptions: [
+        VideoQualityOption(
+          resolution: '1080p',
+          height: 1080,
+          fps: 50,
+          container: 'mp4',
+          displaySize: '142.34 MB (Exact)',
+          fileSizeBytes: BigInt.from(149254400),
           sizeAccuracy: FileSizeAccuracy.exact,
+          videoFormatId: '299',
+          selectedAudioFormatId: '140-19',
+          audioLanguage: audioMeta,
+          formatSelectionStrategy:
+              FormatSelectionStrategy.pairVideoAndAudioWithFfmpeg,
         ),
-        DiscoveredFormat(
-          formatId: '396',
-          container: 'mp4',
-          streamKind: StreamKind.videoOnly,
-          resolution: '640x360',
-          width: 640,
+        VideoQualityOption(
+          resolution: '360p',
           height: 360,
           fps: 30,
-          vcodec: 'av01.0.01M.08',
-          bitrateKbps: 200.5,
-          fileSizeBytes: BigInt.from(15400000),
+          container: 'mp4',
+          displaySize: '~24.50 MB (Estimated)',
+          fileSizeBytes: BigInt.from(25690112),
           sizeAccuracy: FileSizeAccuracy.estimated,
-        ),
-        DiscoveredFormat(
-          formatId: '18',
-          container: 'mp4',
-          streamKind: StreamKind.muxedAudioVideo,
-          resolution: '640x360',
-          width: 640,
-          height: 360,
-          fps: 30,
-          vcodec: 'avc1.42001E',
-          acodec: 'mp4a.40.2',
-          sizeAccuracy: FileSizeAccuracy.unknown,
+          videoFormatId: '18',
+          selectedAudioFormatId: null,
+          audioLanguage: audioMeta,
+          formatSelectionStrategy: FormatSelectionStrategy.combinedAudioVideo,
         ),
       ],
+      audioOptions: [
+        AudioQualityOption(
+          qualityLabel: 'Standard Quality (129 kbps)',
+          container: 'm4a',
+          bitrateKbps: 129.5,
+          displaySize: '22.34 MB (Exact)',
+          fileSizeBytes: BigInt.from(23427071),
+          sizeAccuracy: FileSizeAccuracy.exact,
+          formatId: '140-19',
+          audioLanguage: audioMeta,
+        ),
+      ],
+      formats: const [],
     );
   }
 
@@ -159,7 +193,7 @@ void main() {
     },
   );
 
-  group('Phase 2B MediaDownloadScreen UI', () {
+  group('Simplified IDM-Style MediaDownloadScreen UI', () {
     late FakeMediaDownloadRepository fakeRepo;
 
     setUp(() {
@@ -171,39 +205,40 @@ void main() {
     });
 
     testWidgets(
-      'inspects URL, displays genuine formats & sizes, downloads, cancels, and resumes',
+      'shows clean Video with Sound cards without raw format IDs, switches to Audio Only, downloads, cancels, and resumes',
       (WidgetTester tester) async {
         await tester.pumpWidget(HyperDownloadApp(repository: fakeRepo));
         await tester.pump();
 
-        // Enter URL and tap Analyze.
         await tester.enterText(
           find.byKey(const Key('url_input_field')),
-          'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+          'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
         );
         await tester.tap(find.byKey(const Key('analyze_url_button')));
         await tester.pumpAndSettle();
 
-        // Verify metadata and genuine dynamic format details.
-        expect(find.text('Big Buck Bunny 60fps 4K'), findsOneWidget);
-        expect(find.text('Blender'), findsOneWidget);
-        expect(find.text('Youtube'), findsOneWidget);
-        expect(find.text('10:35'), findsOneWidget);
+        // Metadata + concise original audio note.
+        expect(find.text('Multi-Audio Test Presentation'), findsOneWidget);
+        expect(
+          find.text('Audio included automatically · Original: English (US)'),
+          findsOneWidget,
+        );
 
-        expect(find.text('ID 139'), findsOneWidget);
-        expect(find.text('3.69 MB (Exact)'), findsOneWidget);
-        expect(find.text('ID 396'), findsOneWidget);
-        expect(find.text('~14.69 MB (Estimated)'), findsOneWidget);
-        expect(find.text('ID 18'), findsOneWidget);
-        expect(find.text('Unknown size'), findsOneWidget);
+        // Default mode is Video with Sound showing clean quality cards.
+        expect(find.text('Video with Sound'), findsOneWidget);
+        expect(find.text('Audio Only'), findsOneWidget);
+        expect(find.text('1080p'), findsOneWidget);
+        expect(find.text('50 fps'), findsOneWidget);
+        expect(find.text('142.34 MB (Exact)'), findsOneWidget);
+        expect(find.text('360p'), findsOneWidget);
+        expect(find.text('~24.50 MB (Estimated)'), findsOneWidget);
 
-        // Switch to Merge Video + Audio mode and verify FFmpeg pair selection.
-        await tester.tap(find.text('Merge Video + Audio (FFmpeg)'));
-        await tester.pumpAndSettle();
+        // Technical format IDs, codec strings, and separate dub lists must be hidden.
+        expect(find.textContaining('299'), findsNothing);
+        expect(find.textContaining('140-19'), findsNothing);
+        expect(find.textContaining('avc1'), findsNothing);
 
-        expect(find.byKey(const Key('video_format_list')), findsOneWidget);
-        expect(find.byKey(const Key('audio_format_list')), findsOneWidget);
-
+        // Start download of selected 1080p quality (internally triggers paired video+audio MP4 merge).
         await tester.ensureVisible(
           find.byKey(const Key('start_download_button')),
         );
@@ -214,17 +249,18 @@ void main() {
           fakeRepo.lastStartRequest?.selection.kind,
           DownloadSelectionKind.videoAndAudio,
         );
-        expect(fakeRepo.lastStartRequest?.selection.videoFormatId, '396');
-        expect(fakeRepo.lastStartRequest?.selection.audioFormatId, '139');
+        expect(fakeRepo.lastStartRequest?.selection.videoFormatId, '299');
+        expect(fakeRepo.lastStartRequest?.selection.audioFormatId, '140-19');
+        expect(fakeRepo.lastStartRequest?.selection.mergeContainer, 'mp4');
 
-        // Stream live downloading metrics.
+        // Live progress metrics, cancel, and resume.
         fakeRepo.progressController.add(
           DownloadProgressEvent(
             jobId: 'fake-job-1',
             phase: DownloadPhase.downloading,
             downloadedBytes: BigInt.from(1048576),
-            totalBytes: BigInt.from(15400000),
-            isTotalEstimated: true,
+            totalBytes: BigInt.from(149254400),
+            isTotalEstimated: false,
             speedBytesPerSec: 1048576.0,
             etaSeconds: BigInt.from(14),
           ),
@@ -232,11 +268,8 @@ void main() {
         await tester.pump();
 
         expect(find.text('Downloading'), findsOneWidget);
-        expect(find.text('Transferred: 1.00 MB / ~14.69 MB'), findsOneWidget);
-        expect(find.text('Speed: 1.00 MB/s'), findsOneWidget);
-        expect(find.text('ETA: 00:14'), findsOneWidget);
+        expect(find.text('Transferred: 1.00 MB / 142.34 MB'), findsOneWidget);
 
-        // Cancel active download and confirm Resume becomes active after Canceled event.
         await tester.tap(find.byKey(const Key('cancel_download_button')));
         await tester.pump();
         expect(fakeRepo.lastCanceledJobId, 'fake-job-1');
@@ -246,18 +279,57 @@ void main() {
             jobId: 'fake-job-1',
             phase: DownloadPhase.canceled,
             downloadedBytes: BigInt.from(1048576),
-            totalBytes: BigInt.from(15400000),
-            isTotalEstimated: true,
-            message: 'Download canceled.',
+            totalBytes: BigInt.from(149254400),
+            isTotalEstimated: false,
           ),
         );
         await tester.pump();
 
         expect(find.text('Canceled'), findsOneWidget);
-
         await tester.tap(find.byKey(const Key('resume_download_button')));
         await tester.pump();
         expect(fakeRepo.lastResumedJobId, 'fake-job-1');
+
+        // Switch to Audio Only mode and verify curated original-track audio cards.
+        fakeRepo.progressController.add(
+          DownloadProgressEvent(
+            jobId: 'fake-job-1',
+            phase: DownloadPhase.completed,
+            downloadedBytes: BigInt.from(149254400),
+            totalBytes: BigInt.from(149254400),
+            isTotalEstimated: false,
+          ),
+        );
+        await tester.pump();
+
+        await tester.ensureVisible(find.text('Audio Only'));
+        await tester.tap(find.text('Audio Only'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Standard Quality (129 kbps)'), findsOneWidget);
+        expect(find.text('M4A'), findsOneWidget);
+        expect(find.text('22.34 MB (Exact)'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'displays clear unavailable message when audio track is missing',
+      (WidgetTester tester) async {
+        fakeRepo.returnMissingAudio = true;
+        await tester.pumpWidget(HyperDownloadApp(repository: fakeRepo));
+        await tester.pump();
+
+        await tester.enterText(
+          find.byKey(const Key('url_input_field')),
+          'https://example.com/silent',
+        );
+        await tester.tap(find.byKey(const Key('analyze_url_button')));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('empty_video_options_message')),
+          findsOneWidget,
+        );
       },
     );
 

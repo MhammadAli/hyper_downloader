@@ -32,7 +32,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String dco_decode_String(dynamic raw);
 
   @protected
+  AudioQualityOption dco_decode_audio_quality_option(dynamic raw);
+
+  @protected
+  AudioSelectionConfidence dco_decode_audio_selection_confidence(dynamic raw);
+
+  @protected
+  AudioTrackMetadata dco_decode_audio_track_metadata(dynamic raw);
+
+  @protected
   bool dco_decode_bool(dynamic raw);
+
+  @protected
+  AudioTrackMetadata dco_decode_box_autoadd_audio_track_metadata(dynamic raw);
+
+  @protected
+  bool dco_decode_box_autoadd_bool(dynamic raw);
 
   @protected
   double dco_decode_box_autoadd_f_64(dynamic raw);
@@ -70,7 +85,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FileSizeAccuracy dco_decode_file_size_accuracy(dynamic raw);
 
   @protected
+  FormatSelectionStrategy dco_decode_format_selection_strategy(dynamic raw);
+
+  @protected
   int dco_decode_i_32(dynamic raw);
+
+  @protected
+  List<AudioQualityOption> dco_decode_list_audio_quality_option(dynamic raw);
 
   @protected
   List<DiscoveredFormat> dco_decode_list_discovered_format(dynamic raw);
@@ -79,10 +100,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  List<VideoQualityOption> dco_decode_list_video_quality_option(dynamic raw);
+
+  @protected
   MediaInspection dco_decode_media_inspection(dynamic raw);
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  AudioTrackMetadata? dco_decode_opt_box_autoadd_audio_track_metadata(
+    dynamic raw,
+  );
+
+  @protected
+  bool? dco_decode_opt_box_autoadd_bool(dynamic raw);
 
   @protected
   double? dco_decode_opt_box_autoadd_f_64(dynamic raw);
@@ -112,6 +144,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void dco_decode_unit(dynamic raw);
 
   @protected
+  VideoQualityOption dco_decode_video_quality_option(dynamic raw);
+
+  @protected
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
 
   @protected
@@ -124,7 +159,30 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
+  AudioQualityOption sse_decode_audio_quality_option(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  AudioSelectionConfidence sse_decode_audio_selection_confidence(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  AudioTrackMetadata sse_decode_audio_track_metadata(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer);
+
+  @protected
+  AudioTrackMetadata sse_decode_box_autoadd_audio_track_metadata(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
@@ -168,7 +226,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FileSizeAccuracy sse_decode_file_size_accuracy(SseDeserializer deserializer);
 
   @protected
+  FormatSelectionStrategy sse_decode_format_selection_strategy(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer);
+
+  @protected
+  List<AudioQualityOption> sse_decode_list_audio_quality_option(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<DiscoveredFormat> sse_decode_list_discovered_format(
@@ -179,10 +247,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  List<VideoQualityOption> sse_decode_list_video_quality_option(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   MediaInspection sse_decode_media_inspection(SseDeserializer deserializer);
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  AudioTrackMetadata? sse_decode_opt_box_autoadd_audio_track_metadata(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
   double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer);
@@ -214,6 +295,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
+  VideoQualityOption sse_decode_video_quality_option(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   void sse_encode_AnyhowException(
     AnyhowException self,
     SseSerializer serializer,
@@ -229,7 +315,34 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
+  void sse_encode_audio_quality_option(
+    AudioQualityOption self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_audio_selection_confidence(
+    AudioSelectionConfidence self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_audio_track_metadata(
+    AudioTrackMetadata self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_audio_track_metadata(
+    AudioTrackMetadata self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
@@ -283,7 +396,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_format_selection_strategy(
+    FormatSelectionStrategy self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_audio_quality_option(
+    List<AudioQualityOption> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_discovered_format(
@@ -298,6 +423,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_video_quality_option(
+    List<VideoQualityOption> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_media_inspection(
     MediaInspection self,
     SseSerializer serializer,
@@ -305,6 +436,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_audio_track_metadata(
+    AudioTrackMetadata? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer);
@@ -335,6 +475,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_video_quality_option(
+    VideoQualityOption self,
+    SseSerializer serializer,
+  );
 }
 
 // Section: wire_class

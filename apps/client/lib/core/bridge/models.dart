@@ -6,6 +6,106 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+/// Curated user-facing audio-only quality option using the selected original audio track.
+class AudioQualityOption {
+  final String qualityLabel;
+  final String container;
+  final double? bitrateKbps;
+  final String displaySize;
+  final BigInt? fileSizeBytes;
+  final FileSizeAccuracy sizeAccuracy;
+  final String formatId;
+  final AudioTrackMetadata? audioLanguage;
+
+  const AudioQualityOption({
+    required this.qualityLabel,
+    required this.container,
+    this.bitrateKbps,
+    required this.displaySize,
+    this.fileSizeBytes,
+    required this.sizeAccuracy,
+    required this.formatId,
+    this.audioLanguage,
+  });
+
+  @override
+  int get hashCode =>
+      qualityLabel.hashCode ^
+      container.hashCode ^
+      bitrateKbps.hashCode ^
+      displaySize.hashCode ^
+      fileSizeBytes.hashCode ^
+      sizeAccuracy.hashCode ^
+      formatId.hashCode ^
+      audioLanguage.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AudioQualityOption &&
+          runtimeType == other.runtimeType &&
+          qualityLabel == other.qualityLabel &&
+          container == other.container &&
+          bitrateKbps == other.bitrateKbps &&
+          displaySize == other.displaySize &&
+          fileSizeBytes == other.fileSizeBytes &&
+          sizeAccuracy == other.sizeAccuracy &&
+          formatId == other.formatId &&
+          audioLanguage == other.audioLanguage;
+}
+
+/// Confidence level for identifying the source video's original audio track.
+enum AudioSelectionConfidence {
+  confirmedOriginal,
+  likelyOriginal,
+  singleOrUnmarked,
+  ambiguousOrUnknown,
+}
+
+/// Metadata describing an audio track's language and originality signals.
+class AudioTrackMetadata {
+  final String? language;
+  final String? languageDisplayName;
+  final bool? isOriginal;
+  final bool? isDefault;
+  final bool? isAutoDub;
+  final AudioSelectionConfidence selectionConfidence;
+  final String statusNote;
+
+  const AudioTrackMetadata({
+    this.language,
+    this.languageDisplayName,
+    this.isOriginal,
+    this.isDefault,
+    this.isAutoDub,
+    required this.selectionConfidence,
+    required this.statusNote,
+  });
+
+  @override
+  int get hashCode =>
+      language.hashCode ^
+      languageDisplayName.hashCode ^
+      isOriginal.hashCode ^
+      isDefault.hashCode ^
+      isAutoDub.hashCode ^
+      selectionConfidence.hashCode ^
+      statusNote.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AudioTrackMetadata &&
+          runtimeType == other.runtimeType &&
+          language == other.language &&
+          languageDisplayName == other.languageDisplayName &&
+          isOriginal == other.isOriginal &&
+          isDefault == other.isDefault &&
+          isAutoDub == other.isAutoDub &&
+          selectionConfidence == other.selectionConfidence &&
+          statusNote == other.statusNote;
+}
+
 /// A genuine media format discovered during URL inspection.
 class DiscoveredFormat {
   final String formatId;
@@ -178,7 +278,14 @@ enum DownloadSelectionKind { single, videoAndAudio }
 /// Precision level reported for a format's byte size.
 enum FileSizeAccuracy { exact, estimated, unknown }
 
-/// Metadata and genuinely available formats extracted for a media URL.
+/// Strategy used internally to produce a playable download for a selected quality.
+enum FormatSelectionStrategy {
+  combinedAudioVideo,
+  pairVideoAndAudioWithFfmpeg,
+  audioOnlyStream,
+}
+
+/// Metadata and genuinely available options/formats extracted for a media URL.
 class MediaInspection {
   final String id;
   final String title;
@@ -187,6 +294,9 @@ class MediaInspection {
   final String? thumbnailUrl;
   final String webpageUrl;
   final String providerName;
+  final AudioTrackMetadata? originalAudio;
+  final List<VideoQualityOption> videoOptions;
+  final List<AudioQualityOption> audioOptions;
   final List<DiscoveredFormat> formats;
 
   const MediaInspection({
@@ -197,6 +307,9 @@ class MediaInspection {
     this.thumbnailUrl,
     required this.webpageUrl,
     required this.providerName,
+    this.originalAudio,
+    required this.videoOptions,
+    required this.audioOptions,
     required this.formats,
   });
 
@@ -209,6 +322,9 @@ class MediaInspection {
       thumbnailUrl.hashCode ^
       webpageUrl.hashCode ^
       providerName.hashCode ^
+      originalAudio.hashCode ^
+      videoOptions.hashCode ^
+      audioOptions.hashCode ^
       formats.hashCode;
 
   @override
@@ -223,6 +339,9 @@ class MediaInspection {
           thumbnailUrl == other.thumbnailUrl &&
           webpageUrl == other.webpageUrl &&
           providerName == other.providerName &&
+          originalAudio == other.originalAudio &&
+          videoOptions == other.videoOptions &&
+          audioOptions == other.audioOptions &&
           formats == other.formats;
 }
 
@@ -260,3 +379,63 @@ class StartDownloadRequest {
 
 /// Kind of media streams contained in a discovered format.
 enum StreamKind { muxedAudioVideo, videoOnly, audioOnly }
+
+/// High-level user-facing video quality option representing a complete video with sound.
+class VideoQualityOption {
+  final String resolution;
+  final int? height;
+  final double? fps;
+  final String container;
+  final String displaySize;
+  final BigInt? fileSizeBytes;
+  final FileSizeAccuracy sizeAccuracy;
+  final String videoFormatId;
+  final String? selectedAudioFormatId;
+  final AudioTrackMetadata? audioLanguage;
+  final FormatSelectionStrategy formatSelectionStrategy;
+
+  const VideoQualityOption({
+    required this.resolution,
+    this.height,
+    this.fps,
+    required this.container,
+    required this.displaySize,
+    this.fileSizeBytes,
+    required this.sizeAccuracy,
+    required this.videoFormatId,
+    this.selectedAudioFormatId,
+    this.audioLanguage,
+    required this.formatSelectionStrategy,
+  });
+
+  @override
+  int get hashCode =>
+      resolution.hashCode ^
+      height.hashCode ^
+      fps.hashCode ^
+      container.hashCode ^
+      displaySize.hashCode ^
+      fileSizeBytes.hashCode ^
+      sizeAccuracy.hashCode ^
+      videoFormatId.hashCode ^
+      selectedAudioFormatId.hashCode ^
+      audioLanguage.hashCode ^
+      formatSelectionStrategy.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is VideoQualityOption &&
+          runtimeType == other.runtimeType &&
+          resolution == other.resolution &&
+          height == other.height &&
+          fps == other.fps &&
+          container == other.container &&
+          displaySize == other.displaySize &&
+          fileSizeBytes == other.fileSizeBytes &&
+          sizeAccuracy == other.sizeAccuracy &&
+          videoFormatId == other.videoFormatId &&
+          selectedAudioFormatId == other.selectedAudioFormatId &&
+          audioLanguage == other.audioLanguage &&
+          formatSelectionStrategy == other.formatSelectionStrategy;
+}

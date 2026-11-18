@@ -16,6 +16,64 @@ pub enum StreamKind {
     AudioOnly,
 }
 
+/// Confidence level for identifying the source video's original audio track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AudioSelectionConfidence {
+    ConfirmedOriginal,
+    LikelyOriginal,
+    SingleOrUnmarked,
+    AmbiguousOrUnknown,
+}
+
+/// Metadata describing an audio track's language and originality signals.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioTrackMetadata {
+    pub language: Option<String>,
+    pub language_display_name: Option<String>,
+    pub is_original: Option<bool>,
+    pub is_default: Option<bool>,
+    pub is_auto_dub: Option<bool>,
+    pub selection_confidence: AudioSelectionConfidence,
+    pub status_note: String,
+}
+
+/// Strategy used internally to produce a playable download for a selected quality.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FormatSelectionStrategy {
+    CombinedAudioVideo,
+    PairVideoAndAudioWithFfmpeg,
+    AudioOnlyStream,
+}
+
+/// High-level user-facing video quality option representing a complete video with sound.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VideoQualityOption {
+    pub resolution: String,
+    pub height: Option<u32>,
+    pub fps: Option<f64>,
+    pub container: String,
+    pub display_size: String,
+    pub file_size_bytes: Option<u64>,
+    pub size_accuracy: FileSizeAccuracy,
+    pub video_format_id: String,
+    pub selected_audio_format_id: Option<String>,
+    pub audio_language: Option<AudioTrackMetadata>,
+    pub format_selection_strategy: FormatSelectionStrategy,
+}
+
+/// Curated user-facing audio-only quality option using the selected original audio track.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioQualityOption {
+    pub quality_label: String,
+    pub container: String,
+    pub bitrate_kbps: Option<f64>,
+    pub display_size: String,
+    pub file_size_bytes: Option<u64>,
+    pub size_accuracy: FileSizeAccuracy,
+    pub format_id: String,
+    pub audio_language: Option<AudioTrackMetadata>,
+}
+
 /// A genuine media format discovered during URL inspection.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DiscoveredFormat {
@@ -34,7 +92,7 @@ pub struct DiscoveredFormat {
     pub format_note: Option<String>,
 }
 
-/// Metadata and genuinely available formats extracted for a media URL.
+/// Metadata and genuinely available options/formats extracted for a media URL.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MediaInspection {
     pub id: String,
@@ -44,6 +102,9 @@ pub struct MediaInspection {
     pub thumbnail_url: Option<String>,
     pub webpage_url: String,
     pub provider_name: String,
+    pub original_audio: Option<AudioTrackMetadata>,
+    pub video_options: Vec<VideoQualityOption>,
+    pub audio_options: Vec<AudioQualityOption>,
     pub formats: Vec<DiscoveredFormat>,
 }
 

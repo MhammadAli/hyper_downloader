@@ -5,7 +5,7 @@ import 'package:hyper_download_client/core/bridge/models.dart';
 import 'package:hyper_download_client/features/media_download/media_download_repository.dart';
 import 'package:hyper_download_client/features/media_download/media_download_state.dart';
 
-/// Coordinates URL analysis, dynamic format selection, and single-job downloads.
+/// Coordinates URL analysis, simplified quality selection, and single-job downloads.
 class MediaDownloadCubit extends Cubit<MediaDownloadState> {
   final MediaDownloadRepository _repository;
   StreamSubscription<DownloadProgressEvent>? _progressSubscription;
@@ -63,17 +63,21 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
 
     try {
       final result = await _repository.inspectMedia(targetUrl);
-      final defaults = _pickInitialSelectionDefaults(result);
+      final defaultVideoId = result.videoOptions.isNotEmpty
+          ? result.videoOptions.first.videoFormatId
+          : null;
+      final defaultAudioId = result.audioOptions.isNotEmpty
+          ? result.audioOptions.first.formatId
+          : null;
 
       emit(
         state.copyWith(
           inspectionStatus: InspectionStatus.loaded,
           inspection: result,
           inspectionError: null,
-          selectionMode: SelectionMode.single,
-          selectedSingleFormatId: defaults.singleId,
-          selectedVideoFormatId: defaults.videoId,
-          selectedAudioFormatId: defaults.audioId,
+          mediaMode: DownloadMediaMode.videoWithSound,
+          selectedVideoFormatId: defaultVideoId,
+          selectedAudioOptionFormatId: defaultAudioId,
         ),
       );
     } catch (err) {
@@ -86,24 +90,16 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
     }
   }
 
-  void setSelectionMode(SelectionMode mode) {
-    if (mode == SelectionMode.mergeVideoAudio &&
-        !state.supportsMergeSelection) {
-      return;
-    }
-    emit(state.copyWith(selectionMode: mode));
+  void setMediaMode(DownloadMediaMode mode) {
+    emit(state.copyWith(mediaMode: mode));
   }
 
-  void selectSingleFormat(String formatId) {
-    emit(state.copyWith(selectedSingleFormatId: formatId));
+  void selectVideoQuality(String videoFormatId) {
+    emit(state.copyWith(selectedVideoFormatId: videoFormatId));
   }
 
-  void selectVideoFormat(String formatId) {
-    emit(state.copyWith(selectedVideoFormatId: formatId));
-  }
-
-  void selectAudioFormat(String formatId) {
-    emit(state.copyWith(selectedAudioFormatId: formatId));
+  void selectAudioQuality(String formatId) {
+    emit(state.copyWith(selectedAudioOptionFormatId: formatId));
   }
 
   Future<void> startDownload() async {
@@ -112,17 +108,30 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
       return;
     }
 
-    final selection = state.selectionMode == SelectionMode.single
-        ? DownloadFormatSelection(
-            kind: DownloadSelectionKind.single,
-            formatId: state.selectedSingleFormatId,
-          )
-        : DownloadFormatSelection(
-            kind: DownloadSelectionKind.videoAndAudio,
-            videoFormatId: state.selectedVideoFormatId,
-            audioFormatId: state.selectedAudioFormatId,
-            mergeContainer: 'mp4',
-          );
+    final DownloadFormatSelection selection;
+    if (state.mediaMode == DownloadMediaMode.videoWithSound) {
+      final chosen = state.selectedVideoOption!;
+      if (chosen.formatSelectionStrategy ==
+          FormatSelectionStrategy.combinedAudioVideo) {
+        selection = DownloadFormatSelection(
+          kind: DownloadSelectionKind.single,
+          formatId: chosen.videoFormatId,
+        );
+      } else {
+        selection = DownloadFormatSelection(
+          kind: DownloadSelectionKind.videoAndAudio,
+          videoFormatId: chosen.videoFormatId,
+          audioFormatId: chosen.selectedAudioFormatId,
+          mergeContainer: chosen.container,
+        );
+      }
+    } else {
+      final chosenAudio = state.selectedAudioOption!;
+      selection = DownloadFormatSelection(
+        kind: DownloadSelectionKind.single,
+        formatId: chosenAudio.formatId,
+      );
+    }
 
     final targetUrl = inspection.webpageUrl.isNotEmpty
         ? inspection.webpageUrl
@@ -205,46 +214,6 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
             : null,
       ),
     );
-  }
-
-  ({String? singleId, String? videoId, String? audioId})
-  _pickInitialSelectionDefaults(MediaInspection inspection) {
-    final formats = inspection.formats;
-    if (formats.isEmpty) {
-      return (singleId: null, videoId: null, audioId: null);
-    }
-
-    DiscoveredFormat? preferredMuxed;
-    for (final fmt in formats) {
-      if (fmt.streamKind == StreamKind.muxedAudioVideo) {
-        preferredMuxed = fmt;
-        break;
-      }
-    }
-    final singleId = (preferredMuxed ?? formats.first).formatId;
-
-    final videoOnly = formats
-        .where((f) => f.streamKind == StreamKind.videoOnly)
-        .toList(growable: false);
-    final audioOnly = formats
-        .where((f) => f.streamKind == StreamKind.audioOnly)
-        .toList(growable: false);
-
-    String? bestVideoId;
-    if (videoOnly.isNotEmpty) {
-      final sortedVideo = List<DiscoveredFormat>.from(videoOnly)
-        ..sort((a, b) => (b.height ?? 0).compareTo(a.height ?? 0));
-      bestVideoId = sortedVideo.first.formatId;
-    }
-
-    String? bestAudioId;
-    if (audioOnly.isNotEmpty) {
-      final sortedAudio = List<DiscoveredFormat>.from(audioOnly)
-        ..sort((a, b) => (b.bitrateKbps ?? 0).compareTo(a.bitrateKbps ?? 0));
-      bestAudioId = sortedAudio.first.formatId;
-    }
-
-    return (singleId: singleId, videoId: bestVideoId, audioId: bestAudioId);
   }
 
   String _cleanErrorMessage(Object error) {

@@ -5,8 +5,8 @@ import 'package:hyper_download_client/core/bridge/models.dart';
 import 'package:hyper_download_client/features/media_download/media_download_cubit.dart';
 import 'package:hyper_download_client/features/media_download/media_download_state.dart';
 
-/// Main Phase 2B interactive workspace for URL inspection, dynamic format
-/// selection, single/merged downloads, and cancellation/resume control.
+/// Main interactive workspace providing an IDM-like simplified quality chooser
+/// ("Video with Sound" default + "Audio Only") backed by Rust `yt-dlp` and FFmpeg.
 class MediaDownloadScreen extends StatefulWidget {
   const MediaDownloadScreen({super.key});
 
@@ -76,7 +76,7 @@ class _MediaDownloadScreenState extends State<MediaDownloadScreen> {
             child: Align(
               alignment: Alignment.topCenter,
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1080),
+                constraints: const BoxConstraints(maxWidth: 960),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -103,7 +103,7 @@ class _MediaDownloadScreenState extends State<MediaDownloadScreen> {
                       const SizedBox(height: 16),
                       _MediaMetadataCard(inspection: state.inspection!),
                       const SizedBox(height: 16),
-                      _FormatSelectionCard(state: state),
+                      _QualitySelectionCard(state: state),
                     ],
                     if (state.inspection != null ||
                         state.latestProgress != null ||
@@ -277,11 +277,6 @@ class _MediaMetadataCard extends StatelessWidget {
               ),
           ],
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Discovered streams reflect formats exposed by the source; download only content you are authorized to save.',
-          style: textTheme.bodySmall,
-        ),
       ],
     );
 
@@ -312,17 +307,19 @@ class _MediaMetadataCard extends StatelessWidget {
   }
 }
 
-class _FormatSelectionCard extends StatelessWidget {
+class _QualitySelectionCard extends StatelessWidget {
   final MediaDownloadState state;
 
-  const _FormatSelectionCard({required this.state});
+  const _QualitySelectionCard({required this.state});
 
   @override
   Widget build(BuildContext context) {
     final cubit = context.read<MediaDownloadCubit>();
+    final textTheme = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
 
     return Card(
-      key: const Key('format_selection_card'),
+      key: const Key('quality_selection_card'),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -334,92 +331,64 @@ class _FormatSelectionCard extends StatelessWidget {
               spacing: 12,
               runSpacing: 12,
               children: [
-                Text(
-                  'Available Formats (${state.allFormats.length} discovered)',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                SegmentedButton<SelectionMode>(
-                  key: const Key('selection_mode_toggle'),
-                  segments: [
-                    const ButtonSegment<SelectionMode>(
-                      value: SelectionMode.single,
-                      icon: Icon(Icons.audiotrack_outlined),
-                      label: Text('Single Format'),
+                Text('Download Quality', style: textTheme.titleMedium),
+                SegmentedButton<DownloadMediaMode>(
+                  key: const Key('media_mode_toggle'),
+                  segments: const [
+                    ButtonSegment<DownloadMediaMode>(
+                      value: DownloadMediaMode.videoWithSound,
+                      icon: Icon(Icons.movie_creation_outlined),
+                      label: Text('Video with Sound'),
                     ),
-                    ButtonSegment<SelectionMode>(
-                      value: SelectionMode.mergeVideoAudio,
-                      enabled: state.supportsMergeSelection,
-                      icon: const Icon(Icons.merge_type),
-                      label: const Text('Merge Video + Audio (FFmpeg)'),
+                    ButtonSegment<DownloadMediaMode>(
+                      value: DownloadMediaMode.audioOnly,
+                      icon: Icon(Icons.audiotrack_outlined),
+                      label: Text('Audio Only'),
                     ),
                   ],
-                  selected: {state.selectionMode},
+                  selected: {state.mediaMode},
                   onSelectionChanged: (selected) {
                     if (selected.isNotEmpty) {
-                      cubit.setSelectionMode(selected.first);
+                      cubit.setMediaMode(selected.first);
                     }
                   },
                 ),
               ],
             ),
+            if (state.originalAudio != null) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(
+                    Icons.volume_up_outlined,
+                    size: 16,
+                    color: scheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      state.originalAudio!.statusNote,
+                      key: const Key('audio_policy_note'),
+                      style: textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 12),
-            if (state.selectionMode == SelectionMode.single)
-              _FormatListBox(
-                listKey: const Key('single_format_list'),
-                formats: state.allFormats,
-                selectedFormatId: state.selectedSingleFormatId,
-                onSelect: cubit.selectSingleFormat,
+            if (state.mediaMode == DownloadMediaMode.videoWithSound)
+              _VideoQualityList(
+                options: state.videoOptions,
+                selectedVideoFormatId: state.selectedVideoFormatId,
+                onSelect: cubit.selectVideoQuality,
               )
             else
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final videoBox = Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Video Stream (${state.videoOnlyFormats.length})',
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      _FormatListBox(
-                        listKey: const Key('video_format_list'),
-                        formats: state.videoOnlyFormats,
-                        selectedFormatId: state.selectedVideoFormatId,
-                        onSelect: cubit.selectVideoFormat,
-                      ),
-                    ],
-                  );
-                  final audioBox = Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Audio Stream (${state.audioOnlyFormats.length})',
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      _FormatListBox(
-                        listKey: const Key('audio_format_list'),
-                        formats: state.audioOnlyFormats,
-                        selectedFormatId: state.selectedAudioFormatId,
-                        onSelect: cubit.selectAudioFormat,
-                      ),
-                    ],
-                  );
-
-                  if (constraints.maxWidth >= 760) {
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(child: videoBox),
-                        const SizedBox(width: 16),
-                        Expanded(child: audioBox),
-                      ],
-                    );
-                  }
-                  return Column(
-                    children: [videoBox, const SizedBox(height: 16), audioBox],
-                  );
-                },
+              _AudioQualityList(
+                options: state.audioOptions,
+                selectedFormatId: state.selectedAudioOptionFormatId,
+                onSelect: cubit.selectAudioQuality,
               ),
           ],
         ),
@@ -428,52 +397,53 @@ class _FormatSelectionCard extends StatelessWidget {
   }
 }
 
-class _FormatListBox extends StatelessWidget {
-  final Key listKey;
-  final List<DiscoveredFormat> formats;
-  final String? selectedFormatId;
+class _VideoQualityList extends StatelessWidget {
+  final List<VideoQualityOption> options;
+  final String? selectedVideoFormatId;
   final ValueChanged<String> onSelect;
 
-  const _FormatListBox({
-    required this.listKey,
-    required this.formats,
-    required this.selectedFormatId,
+  const _VideoQualityList({
+    required this.options,
+    required this.selectedVideoFormatId,
     required this.onSelect,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (formats.isEmpty) {
+    if (options.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 16),
-        child: Text('No compatible streams discovered in this category.'),
+        child: Text(
+          'No playable Video with Sound options were discovered (audio track unavailable).',
+          key: Key('empty_video_options_message'),
+        ),
       );
     }
 
     return Container(
-      constraints: const BoxConstraints(maxHeight: 280),
       decoration: BoxDecoration(
         border: Border.all(color: Theme.of(context).dividerColor),
         borderRadius: BorderRadius.circular(8),
       ),
       child: ListView.separated(
-        key: listKey,
+        key: const Key('video_quality_list'),
         shrinkWrap: true,
-        itemCount: formats.length,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: options.length,
         separatorBuilder: (context, index) => const Divider(height: 1),
         itemBuilder: (context, index) {
-          final fmt = formats[index];
-          final isSelected = fmt.formatId == selectedFormatId;
+          final opt = options[index];
+          final isSelected = opt.videoFormatId == selectedVideoFormatId;
           final scheme = Theme.of(context).colorScheme;
 
           return InkWell(
-            key: Key('format_row_${fmt.formatId}'),
-            onTap: () => onSelect(fmt.formatId),
+            key: Key('video_quality_card_${opt.resolution}'),
+            onTap: () => onSelect(opt.videoFormatId),
             child: Container(
               color: isSelected
                   ? scheme.primaryContainer.withValues(alpha: 0.35)
                   : null,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               child: Row(
                 children: [
                   Icon(
@@ -482,39 +452,47 @@ class _FormatListBox extends StatelessWidget {
                         : Icons.radio_button_unchecked,
                     color: isSelected ? scheme.primary : scheme.outline,
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 14),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Wrap(
+                      spacing: 12,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              'ID ${fmt.formatId}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            Text(fmt.container.toUpperCase()),
-                            Text(fmt.resolution),
-                            if (fmt.fps != null)
-                              Text('${fmt.fps!.round()} fps'),
-                            _StreamKindLabel(kind: fmt.streamKind),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
                         Text(
-                          _formatCodecSummary(fmt),
-                          style: Theme.of(context).textTheme.bodySmall,
+                          opt.resolution,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (opt.fps != null)
+                          Text(
+                            '${opt.fps!.round()} fps',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: scheme.secondaryContainer,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            opt.container.toUpperCase(),
+                            style: Theme.of(context).textTheme.labelSmall,
+                          ),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(width: 12),
-                  _FormatSizeBadge(format: fmt),
+                  Text(
+                    opt.displaySize,
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
                 ],
               ),
             ),
@@ -525,44 +503,104 @@ class _FormatListBox extends StatelessWidget {
   }
 }
 
-class _StreamKindLabel extends StatelessWidget {
-  final StreamKind kind;
+class _AudioQualityList extends StatelessWidget {
+  final List<AudioQualityOption> options;
+  final String? selectedFormatId;
+  final ValueChanged<String> onSelect;
 
-  const _StreamKindLabel({required this.kind});
+  const _AudioQualityList({
+    required this.options,
+    required this.selectedFormatId,
+    required this.onSelect,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final label = switch (kind) {
-      StreamKind.muxedAudioVideo => 'Muxed AV',
-      StreamKind.videoOnly => 'Video only',
-      StreamKind.audioOnly => 'Audio only',
-    };
+    if (options.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Text(
+          'No downloadable Audio Only streams were discovered for this media.',
+          key: Key('empty_audio_options_message'),
+        ),
+      );
+    }
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: Theme.of(context).dividerColor),
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: Text(label, style: Theme.of(context).textTheme.labelSmall),
+      child: ListView.separated(
+        key: const Key('audio_quality_list'),
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: options.length,
+        separatorBuilder: (context, index) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final opt = options[index];
+          final isSelected = opt.formatId == selectedFormatId;
+          final scheme = Theme.of(context).colorScheme;
+
+          return InkWell(
+            key: Key('audio_quality_card_$index'),
+            onTap: () => onSelect(opt.formatId),
+            child: Container(
+              color: isSelected
+                  ? scheme.primaryContainer.withValues(alpha: 0.35)
+                  : null,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(
+                    isSelected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    color: isSelected ? scheme.primary : scheme.outline,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Wrap(
+                      spacing: 12,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          opt.qualityLabel,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: scheme.secondaryContainer,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            opt.container.toUpperCase(),
+                            style: Theme.of(context).textTheme.labelSmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    opt.displaySize,
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
-  }
-}
-
-class _FormatSizeBadge extends StatelessWidget {
-  final DiscoveredFormat format;
-
-  const _FormatSizeBadge({required this.format});
-
-  @override
-  Widget build(BuildContext context) {
-    final label = switch (format.sizeAccuracy) {
-      FileSizeAccuracy.exact when format.fileSizeBytes != null =>
-        '${_formatBytes(format.fileSizeBytes!)} (Exact)',
-      FileSizeAccuracy.estimated when format.fileSizeBytes != null =>
-        '~${_formatBytes(format.fileSizeBytes!)} (Estimated)',
-      _ => 'Unknown size',
-    };
-    return Text(label, style: const TextStyle(fontWeight: FontWeight.w500));
   }
 }
 
@@ -686,17 +724,6 @@ class _DownloadControlsCard extends StatelessWidget {
       ),
     );
   }
-}
-
-String _formatCodecSummary(DiscoveredFormat fmt) {
-  final parts = <String>[];
-  if (fmt.vcodec != null) parts.add('Video: ${fmt.vcodec}');
-  if (fmt.acodec != null) parts.add('Audio: ${fmt.acodec}');
-  if (fmt.bitrateKbps != null) {
-    parts.add('${fmt.bitrateKbps!.round()} kbps');
-  }
-  if (fmt.formatNote != null) parts.add(fmt.formatNote!);
-  return parts.join(' • ');
 }
 
 String _formatDuration(int totalSeconds) {

@@ -1,7 +1,9 @@
 use crate::frb_generated::StreamSink;
 pub use crate::models::{
-    DiscoveredFormat, DownloadFormatSelection, DownloadPhase, DownloadProgressEvent,
-    DownloadSelectionKind, FileSizeAccuracy, MediaInspection, StartDownloadRequest, StreamKind,
+    AudioQualityOption, AudioSelectionConfidence, AudioTrackMetadata, DiscoveredFormat,
+    DownloadFormatSelection, DownloadPhase, DownloadProgressEvent, DownloadSelectionKind,
+    FileSizeAccuracy, FormatSelectionStrategy, MediaInspection, StartDownloadRequest, StreamKind,
+    VideoQualityOption,
 };
 use crate::yt_dlp::{inspect_media_async, DownloadManager};
 

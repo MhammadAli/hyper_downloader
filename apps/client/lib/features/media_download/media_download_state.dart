@@ -1,25 +1,25 @@
 import 'package:equatable/equatable.dart';
 import 'package:hyper_download_client/core/bridge/models.dart';
 
-/// UI selection mode for downloading either one format or a merged pair.
-enum SelectionMode { single, mergeVideoAudio }
+
+/// Simplified IDM-style download modes shown in the UI.
+enum DownloadMediaMode { videoWithSound, audioOnly }
 
 /// URL inspection lifecycle status.
 enum InspectionStatus { initial, loading, loaded, failure }
 
 const Object _unset = Object();
 
-/// Immutable UI and engine state for Phase 2B media inspection & downloading.
+/// Immutable UI and engine state for IDM-style media inspection & downloading.
 class MediaDownloadState extends Equatable {
   final String engineStatus;
   final String urlInput;
   final InspectionStatus inspectionStatus;
   final MediaInspection? inspection;
   final String? inspectionError;
-  final SelectionMode selectionMode;
-  final String? selectedSingleFormatId;
+  final DownloadMediaMode mediaMode;
   final String? selectedVideoFormatId;
-  final String? selectedAudioFormatId;
+  final String? selectedAudioOptionFormatId;
   final String? activeJobId;
   final bool isStartingDownload;
   final DownloadProgressEvent? latestProgress;
@@ -31,28 +31,40 @@ class MediaDownloadState extends Equatable {
     this.inspectionStatus = InspectionStatus.initial,
     this.inspection,
     this.inspectionError,
-    this.selectionMode = SelectionMode.single,
-    this.selectedSingleFormatId,
+    this.mediaMode = DownloadMediaMode.videoWithSound,
     this.selectedVideoFormatId,
-    this.selectedAudioFormatId,
+    this.selectedAudioOptionFormatId,
     this.activeJobId,
     this.isStartingDownload = false,
     this.latestProgress,
     this.downloadError,
   });
 
-  List<DiscoveredFormat> get allFormats => inspection?.formats ?? const [];
+  List<VideoQualityOption> get videoOptions =>
+      inspection?.videoOptions ?? const [];
 
-  List<DiscoveredFormat> get videoOnlyFormats => allFormats
-      .where((f) => f.streamKind == StreamKind.videoOnly)
-      .toList(growable: false);
+  List<AudioQualityOption> get audioOptions =>
+      inspection?.audioOptions ?? const [];
 
-  List<DiscoveredFormat> get audioOnlyFormats => allFormats
-      .where((f) => f.streamKind == StreamKind.audioOnly)
-      .toList(growable: false);
+  AudioTrackMetadata? get originalAudio => inspection?.originalAudio;
 
-  bool get supportsMergeSelection =>
-      videoOnlyFormats.isNotEmpty && audioOnlyFormats.isNotEmpty;
+  VideoQualityOption? get selectedVideoOption {
+    final key = selectedVideoFormatId;
+    if (key == null) return null;
+    for (final option in videoOptions) {
+      if (option.videoFormatId == key) return option;
+    }
+    return null;
+  }
+
+  AudioQualityOption? get selectedAudioOption {
+    final key = selectedAudioOptionFormatId;
+    if (key == null) return null;
+    for (final option in audioOptions) {
+      if (option.formatId == key) return option;
+    }
+    return null;
+  }
 
   DownloadPhase? get currentPhase => latestProgress?.phase;
 
@@ -66,12 +78,10 @@ class MediaDownloadState extends Equatable {
 
   bool get canStartDownload {
     if (isDownloadActive || inspection == null) return false;
-    switch (selectionMode) {
-      case SelectionMode.single:
-        return selectedSingleFormatId != null;
-      case SelectionMode.mergeVideoAudio:
-        return selectedVideoFormatId != null && selectedAudioFormatId != null;
-    }
+    return switch (mediaMode) {
+      DownloadMediaMode.videoWithSound => selectedVideoOption != null,
+      DownloadMediaMode.audioOnly => selectedAudioOption != null,
+    };
   }
 
   bool get canCancel {
@@ -95,10 +105,9 @@ class MediaDownloadState extends Equatable {
     InspectionStatus? inspectionStatus,
     Object? inspection = _unset,
     Object? inspectionError = _unset,
-    SelectionMode? selectionMode,
-    Object? selectedSingleFormatId = _unset,
+    DownloadMediaMode? mediaMode,
     Object? selectedVideoFormatId = _unset,
-    Object? selectedAudioFormatId = _unset,
+    Object? selectedAudioOptionFormatId = _unset,
     Object? activeJobId = _unset,
     bool? isStartingDownload,
     Object? latestProgress = _unset,
@@ -114,16 +123,14 @@ class MediaDownloadState extends Equatable {
       inspectionError: identical(inspectionError, _unset)
           ? this.inspectionError
           : inspectionError as String?,
-      selectionMode: selectionMode ?? this.selectionMode,
-      selectedSingleFormatId: identical(selectedSingleFormatId, _unset)
-          ? this.selectedSingleFormatId
-          : selectedSingleFormatId as String?,
+      mediaMode: mediaMode ?? this.mediaMode,
       selectedVideoFormatId: identical(selectedVideoFormatId, _unset)
           ? this.selectedVideoFormatId
           : selectedVideoFormatId as String?,
-      selectedAudioFormatId: identical(selectedAudioFormatId, _unset)
-          ? this.selectedAudioFormatId
-          : selectedAudioFormatId as String?,
+      selectedAudioOptionFormatId:
+          identical(selectedAudioOptionFormatId, _unset)
+          ? this.selectedAudioOptionFormatId
+          : selectedAudioOptionFormatId as String?,
       activeJobId: identical(activeJobId, _unset)
           ? this.activeJobId
           : activeJobId as String?,
@@ -149,12 +156,14 @@ class MediaDownloadState extends Equatable {
     inspection?.thumbnailUrl,
     inspection?.webpageUrl,
     inspection?.providerName,
+    inspection?.originalAudio,
+    inspection?.videoOptions,
+    inspection?.audioOptions,
     inspection?.formats,
     inspectionError,
-    selectionMode,
-    selectedSingleFormatId,
+    mediaMode,
     selectedVideoFormatId,
-    selectedAudioFormatId,
+    selectedAudioOptionFormatId,
     activeJobId,
     isStartingDownload,
     latestProgress,
