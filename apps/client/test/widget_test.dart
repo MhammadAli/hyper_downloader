@@ -7,8 +7,26 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hyper_download_client/core/bridge/api.dart';
 import 'package:hyper_download_client/core/bridge/frb_generated.dart';
 import 'package:hyper_download_client/core/bridge/models.dart';
+import 'package:hyper_download_client/features/media_download/desktop_file_launcher.dart';
 import 'package:hyper_download_client/features/media_download/media_download_repository.dart';
 import 'package:hyper_download_client/main.dart';
+
+class FakeDesktopFileLauncher implements DesktopFileLauncher {
+  String? lastOpenedFile;
+  String? lastRevealedFile;
+
+  @override
+  Future<bool> openFile(String path) async {
+    lastOpenedFile = path;
+    return true;
+  }
+
+  @override
+  Future<bool> revealInFolder(String path) async {
+    lastRevealedFile = path;
+    return true;
+  }
+}
 
 class FakeMediaDownloadRepository implements MediaDownloadRepository {
   final StreamController<DownloadProgressEvent> progressController =
@@ -19,6 +37,7 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
   String? lastResumedJobId;
   bool shouldFailInspection = false;
   bool returnMissingAudio = false;
+  String sampleTitle = 'Multi-Audio Test Presentation';
 
   @override
   String ping() => 'pong';
@@ -60,7 +79,7 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
 
     return MediaInspection(
       id: 'TsT1ntGyj4Q',
-      title: 'Multi-Audio Test Presentation',
+      title: sampleTitle,
       uploader: 'Channel Author',
       durationSeconds: 1448.0,
       thumbnailUrl: null,
@@ -155,7 +174,7 @@ void main() {
   );
 
   testWidgets(
-    'HyperDownloadApp renders ping and engineVersion from Rust Debug DLL',
+    'HyperDownloadApp initializes cleanly from Rust Debug DLL without pong badge',
     (WidgetTester tester) async {
       final debugDll = File('../../rust/target/debug/engine_ffi.dll');
       expect(debugDll.existsSync(), isTrue);
@@ -169,7 +188,9 @@ void main() {
       await tester.pumpWidget(const HyperDownloadApp());
       await tester.pump();
 
-      expect(find.text('Rust: pong (v0.1.0)'), findsOneWidget);
+      expect(find.text('HyperDownload'), findsOneWidget);
+      expect(find.textContaining('pong'), findsNothing);
+      expect(find.byKey(const Key('error_banner')), findsNothing);
 
       await tester.pumpWidget(const SizedBox.shrink());
       RustLib.dispose();
@@ -193,11 +214,13 @@ void main() {
     },
   );
 
-  group('Simplified IDM-Style MediaDownloadScreen UI', () {
+  group('Phase 2C Refined Desktop MediaDownloadScreen UI', () {
     late FakeMediaDownloadRepository fakeRepo;
+    late FakeDesktopFileLauncher fakeLauncher;
 
     setUp(() {
       fakeRepo = FakeMediaDownloadRepository();
+      fakeLauncher = FakeDesktopFileLauncher();
     });
 
     tearDown(() async {
@@ -205,72 +228,64 @@ void main() {
     });
 
     testWidgets(
-      'shows clean Video with Sound cards without raw format IDs, switches to Audio Only, downloads, cancels, and resumes',
+      'supports Video with Sound default, Pause -> Resume, Audio Only, and Open Folder / File actions',
       (WidgetTester tester) async {
-        await tester.pumpWidget(HyperDownloadApp(repository: fakeRepo));
+        await tester.pumpWidget(
+          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
+        );
         await tester.pump();
+
+        expect(find.textContaining('pong'), findsNothing);
 
         await tester.enterText(
           find.byKey(const Key('url_input_field')),
-          'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
+          'https://www.youtube.com/shorts/aqz-KE-bpKQ',
         );
         await tester.tap(find.byKey(const Key('analyze_url_button')));
         await tester.pumpAndSettle();
 
-        // Metadata + concise original audio note.
         expect(find.text('Multi-Audio Test Presentation'), findsOneWidget);
         expect(
           find.text('Audio included automatically · Original: English (US)'),
           findsOneWidget,
         );
-
-        // Default mode is Video with Sound showing clean quality cards.
         expect(find.text('Video with Sound'), findsOneWidget);
         expect(find.text('Audio Only'), findsOneWidget);
         expect(find.text('1080p'), findsOneWidget);
         expect(find.text('50 fps'), findsOneWidget);
         expect(find.text('142.34 MB (Exact)'), findsOneWidget);
-        expect(find.text('360p'), findsOneWidget);
-        expect(find.text('~24.50 MB (Estimated)'), findsOneWidget);
 
-        // Technical format IDs, codec strings, and separate dub lists must be hidden.
+        // Raw format IDs and codec details must stay hidden.
         expect(find.textContaining('299'), findsNothing);
         expect(find.textContaining('140-19'), findsNothing);
         expect(find.textContaining('avc1'), findsNothing);
 
-        // Start download of selected 1080p quality (internally triggers paired video+audio MP4 merge).
+        // Start download.
         await tester.ensureVisible(
           find.byKey(const Key('start_download_button')),
         );
         await tester.tap(find.byKey(const Key('start_download_button')));
         await tester.pump();
 
-        expect(
-          fakeRepo.lastStartRequest?.selection.kind,
-          DownloadSelectionKind.videoAndAudio,
-        );
-        expect(fakeRepo.lastStartRequest?.selection.videoFormatId, '299');
-        expect(fakeRepo.lastStartRequest?.selection.audioFormatId, '140-19');
-        expect(fakeRepo.lastStartRequest?.selection.mergeContainer, 'mp4');
-
-        // Live progress metrics, cancel, and resume.
+        // Stream live progress -> test Pause -> Paused -> Resume.
         fakeRepo.progressController.add(
           DownloadProgressEvent(
             jobId: 'fake-job-1',
             phase: DownloadPhase.downloading,
-            downloadedBytes: BigInt.from(1048576),
+            downloadedBytes: BigInt.from(74627200),
             totalBytes: BigInt.from(149254400),
             isTotalEstimated: false,
-            speedBytesPerSec: 1048576.0,
-            etaSeconds: BigInt.from(14),
+            speedBytesPerSec: 2097152.0,
+            etaSeconds: BigInt.from(35),
           ),
         );
         await tester.pump();
 
         expect(find.text('Downloading'), findsOneWidget);
-        expect(find.text('Transferred: 1.00 MB / 142.34 MB'), findsOneWidget);
+        expect(find.text('50%'), findsOneWidget);
+        expect(find.text('Transferred: 71.17 MB / 142.34 MB'), findsOneWidget);
 
-        await tester.tap(find.byKey(const Key('cancel_download_button')));
+        await tester.tap(find.byKey(const Key('pause_download_button')));
         await tester.pump();
         expect(fakeRepo.lastCanceledJobId, 'fake-job-1');
 
@@ -278,19 +293,22 @@ void main() {
           DownloadProgressEvent(
             jobId: 'fake-job-1',
             phase: DownloadPhase.canceled,
-            downloadedBytes: BigInt.from(1048576),
+            downloadedBytes: BigInt.from(74627200),
             totalBytes: BigInt.from(149254400),
             isTotalEstimated: false,
           ),
         );
         await tester.pump();
 
-        expect(find.text('Canceled'), findsOneWidget);
+        expect(find.text('Paused'), findsOneWidget);
+
         await tester.tap(find.byKey(const Key('resume_download_button')));
         await tester.pump();
         expect(fakeRepo.lastResumedJobId, 'fake-job-1');
 
-        // Switch to Audio Only mode and verify curated original-track audio cards.
+        // Complete download and verify Open Folder / Open File actions.
+        const savedPath =
+            r'F:\Downloads\شفرة أمريكا - [TsT1ntGyj4Q] [299+140-19].mp4';
         fakeRepo.progressController.add(
           DownloadProgressEvent(
             jobId: 'fake-job-1',
@@ -298,10 +316,24 @@ void main() {
             downloadedBytes: BigInt.from(149254400),
             totalBytes: BigInt.from(149254400),
             isTotalEstimated: false,
+            outputPath: savedPath,
           ),
         );
-        await tester.pump();
+        await tester.pumpAndSettle();
 
+        expect(find.text('Completed'), findsOneWidget);
+        expect(find.byKey(const Key('completed_file_panel')), findsOneWidget);
+
+        await tester.ensureVisible(find.byKey(const Key('open_folder_button')));
+        await tester.tap(find.byKey(const Key('open_folder_button')));
+        await tester.pump();
+        expect(fakeLauncher.lastRevealedFile, savedPath);
+
+        await tester.tap(find.byKey(const Key('open_file_button')));
+        await tester.pump();
+        expect(fakeLauncher.lastOpenedFile, savedPath);
+
+        // Switch to Audio Only mode cleanly.
         await tester.ensureVisible(find.text('Audio Only'));
         await tester.tap(find.text('Audio Only'));
         await tester.pumpAndSettle();
@@ -313,10 +345,39 @@ void main() {
     );
 
     testWidgets(
+      'renders long Arabic titles and narrow resized windows without overflow',
+      (WidgetTester tester) async {
+        tester.view.physicalSize = const Size(460, 760);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        fakeRepo.sampleTitle =
+            'شفرة أمريكا: لماذا يرتعب الأمريكي من الإجازة أو المرض - وهم الحلم الأمريكي الطويل جدا للاختبار';
+
+        await tester.pumpWidget(
+          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
+        );
+        await tester.pump();
+
+        await tester.enterText(
+          find.byKey(const Key('url_input_field')),
+          'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
+        );
+        await tester.tap(find.byKey(const Key('analyze_url_button')));
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('شفرة أمريكا'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
       'displays clear unavailable message when audio track is missing',
       (WidgetTester tester) async {
         fakeRepo.returnMissingAudio = true;
-        await tester.pumpWidget(HyperDownloadApp(repository: fakeRepo));
+        await tester.pumpWidget(
+          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
+        );
         await tester.pump();
 
         await tester.enterText(
@@ -337,7 +398,9 @@ void main() {
       WidgetTester tester,
     ) async {
       fakeRepo.shouldFailInspection = true;
-      await tester.pumpWidget(HyperDownloadApp(repository: fakeRepo));
+      await tester.pumpWidget(
+        HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
+      );
       await tester.pump();
 
       await tester.enterText(

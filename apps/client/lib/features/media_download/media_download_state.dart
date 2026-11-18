@@ -1,7 +1,6 @@
 import 'package:equatable/equatable.dart';
 import 'package:hyper_download_client/core/bridge/models.dart';
 
-
 /// Simplified IDM-style download modes shown in the UI.
 enum DownloadMediaMode { videoWithSound, audioOnly }
 
@@ -12,7 +11,8 @@ const Object _unset = Object();
 
 /// Immutable UI and engine state for IDM-style media inspection & downloading.
 class MediaDownloadState extends Equatable {
-  final String engineStatus;
+  final bool isEngineReady;
+  final String? engineError;
   final String urlInput;
   final InspectionStatus inspectionStatus;
   final MediaInspection? inspection;
@@ -22,11 +22,13 @@ class MediaDownloadState extends Equatable {
   final String? selectedAudioOptionFormatId;
   final String? activeJobId;
   final bool isStartingDownload;
+  final bool isPaused;
   final DownloadProgressEvent? latestProgress;
   final String? downloadError;
 
   const MediaDownloadState({
-    this.engineStatus = 'Connecting to Rust engine...',
+    this.isEngineReady = false,
+    this.engineError,
     this.urlInput = '',
     this.inspectionStatus = InspectionStatus.initial,
     this.inspection,
@@ -36,6 +38,7 @@ class MediaDownloadState extends Equatable {
     this.selectedAudioOptionFormatId,
     this.activeJobId,
     this.isStartingDownload = false,
+    this.isPaused = false,
     this.latestProgress,
     this.downloadError,
   });
@@ -84,6 +87,14 @@ class MediaDownloadState extends Equatable {
     };
   }
 
+  bool get canPause {
+    if (activeJobId == null) return false;
+    final phase = currentPhase;
+    return isStartingDownload ||
+        phase == DownloadPhase.analyzing ||
+        phase == DownloadPhase.downloading;
+  }
+
   bool get canCancel {
     if (activeJobId == null) return false;
     final phase = currentPhase;
@@ -96,11 +107,14 @@ class MediaDownloadState extends Equatable {
   bool get canResume {
     if (activeJobId == null || isStartingDownload) return false;
     final phase = currentPhase;
-    return phase == DownloadPhase.canceled || phase == DownloadPhase.failed;
+    return isPaused ||
+        phase == DownloadPhase.canceled ||
+        phase == DownloadPhase.failed;
   }
 
   MediaDownloadState copyWith({
-    String? engineStatus,
+    bool? isEngineReady,
+    Object? engineError = _unset,
     String? urlInput,
     InspectionStatus? inspectionStatus,
     Object? inspection = _unset,
@@ -110,11 +124,15 @@ class MediaDownloadState extends Equatable {
     Object? selectedAudioOptionFormatId = _unset,
     Object? activeJobId = _unset,
     bool? isStartingDownload,
+    bool? isPaused,
     Object? latestProgress = _unset,
     Object? downloadError = _unset,
   }) {
     return MediaDownloadState(
-      engineStatus: engineStatus ?? this.engineStatus,
+      isEngineReady: isEngineReady ?? this.isEngineReady,
+      engineError: identical(engineError, _unset)
+          ? this.engineError
+          : engineError as String?,
       urlInput: urlInput ?? this.urlInput,
       inspectionStatus: inspectionStatus ?? this.inspectionStatus,
       inspection: identical(inspection, _unset)
@@ -135,6 +153,7 @@ class MediaDownloadState extends Equatable {
           ? this.activeJobId
           : activeJobId as String?,
       isStartingDownload: isStartingDownload ?? this.isStartingDownload,
+      isPaused: isPaused ?? this.isPaused,
       latestProgress: identical(latestProgress, _unset)
           ? this.latestProgress
           : latestProgress as DownloadProgressEvent?,
@@ -146,7 +165,8 @@ class MediaDownloadState extends Equatable {
 
   @override
   List<Object?> get props => [
-    engineStatus,
+    isEngineReady,
+    engineError,
     urlInput,
     inspectionStatus,
     inspection?.id,
@@ -166,6 +186,7 @@ class MediaDownloadState extends Equatable {
     selectedAudioOptionFormatId,
     activeJobId,
     isStartingDownload,
+    isPaused,
     latestProgress,
     downloadError,
   ];

@@ -106,10 +106,12 @@ void main() {
     });
 
     blocTest<MediaDownloadCubit, MediaDownloadState>(
-      'initialize checks ping/version and sets ready status',
+      'initialize marks engine ready quietly when ping succeeds',
       build: () => MediaDownloadCubit(repository: repo),
       act: (cubit) => cubit.initialize(),
-      expect: () => const [MediaDownloadState(engineStatus: 'pong (v0.1.0)')],
+      expect: () => const [
+        MediaDownloadState(isEngineReady: true, engineError: null),
+      ],
     );
 
     blocTest<MediaDownloadCubit, MediaDownloadState>(
@@ -117,9 +119,9 @@ void main() {
       build: () => MediaDownloadCubit(repository: repo)..initialize(),
       act: (cubit) => cubit.analyzeUrl('   '),
       expect: () => const [
-        MediaDownloadState(engineStatus: 'pong (v0.1.0)', urlInput: '   '),
+        MediaDownloadState(isEngineReady: true, urlInput: '   '),
         MediaDownloadState(
-          engineStatus: 'pong (v0.1.0)',
+          isEngineReady: true,
           urlInput: '   ',
           inspectionStatus: InspectionStatus.failure,
           inspectionError: 'Please paste or enter a media URL to analyze.',
@@ -140,16 +142,16 @@ void main() {
           cubit.analyzeUrl('https://www.youtube.com/watch?v=TsT1ntGyj4Q'),
       expect: () => [
         const MediaDownloadState(
-          engineStatus: 'pong (v0.1.0)',
+          isEngineReady: true,
           urlInput: 'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
         ),
         const MediaDownloadState(
-          engineStatus: 'pong (v0.1.0)',
+          isEngineReady: true,
           urlInput: 'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
           inspectionStatus: InspectionStatus.loading,
         ),
         MediaDownloadState(
-          engineStatus: 'pong (v0.1.0)',
+          isEngineReady: true,
           urlInput: 'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
           inspectionStatus: InspectionStatus.loaded,
           inspection: _sampleInspection(),
@@ -247,7 +249,7 @@ void main() {
     );
 
     blocTest<MediaDownloadCubit, MediaDownloadState>(
-      'cancel and resume invoke repository with active job ID',
+      'pause marks state paused cleanly and resume clears paused state',
       build: () {
         when(
           () => repo.inspectMedia(any()),
@@ -275,9 +277,9 @@ void main() {
           ),
         );
         await Future<void>.delayed(Duration.zero);
-        expect(cubit.state.canCancel, isTrue);
+        expect(cubit.state.canPause, isTrue);
 
-        await cubit.cancelDownload();
+        await cubit.pauseDownload();
         progressController.add(
           DownloadProgressEvent(
             jobId: 'job-99',
@@ -285,17 +287,59 @@ void main() {
             downloadedBytes: BigInt.from(512000),
             totalBytes: BigInt.from(149254400),
             isTotalEstimated: false,
-            message: 'Download canceled.',
           ),
         );
         await Future<void>.delayed(Duration.zero);
+        expect(cubit.state.isPaused, isTrue);
         expect(cubit.state.canResume, isTrue);
 
         await cubit.resumeDownload();
+        expect(cubit.state.isPaused, isFalse);
       },
       verify: (_) {
         verify(() => repo.cancelDownload('job-99')).called(1);
         verify(() => repo.resumeDownload('job-99')).called(1);
+      },
+    );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'cancelDownload keeps isPaused false',
+      build: () {
+        when(
+          () => repo.inspectMedia(any()),
+        ).thenAnswer((_) async => _sampleInspection());
+        when(() => repo.startDownload(any())).thenAnswer((_) async => 'job-88');
+        when(() => repo.cancelDownload('job-88')).thenAnswer((_) async {});
+        return MediaDownloadCubit(repository: repo)..initialize();
+      },
+      act: (cubit) async {
+        await cubit.analyzeUrl('https://www.youtube.com/watch?v=TsT1ntGyj4Q');
+        await cubit.startDownload();
+        progressController.add(
+          DownloadProgressEvent(
+            jobId: 'job-88',
+            phase: DownloadPhase.downloading,
+            downloadedBytes: BigInt.from(1000),
+            totalBytes: BigInt.from(10000),
+            isTotalEstimated: false,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await cubit.cancelDownload();
+        progressController.add(
+          DownloadProgressEvent(
+            jobId: 'job-88',
+            phase: DownloadPhase.canceled,
+            downloadedBytes: BigInt.from(1000),
+            totalBytes: BigInt.from(10000),
+            isTotalEstimated: false,
+            message: 'Download canceled.',
+          ),
+        );
+      },
+      verify: (cubit) {
+        expect(cubit.state.isPaused, isFalse);
+        expect(cubit.state.latestProgress?.phase, DownloadPhase.canceled);
       },
     );
   });

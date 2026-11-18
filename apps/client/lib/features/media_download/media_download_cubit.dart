@@ -9,6 +9,7 @@ import 'package:hyper_download_client/features/media_download/media_download_sta
 class MediaDownloadCubit extends Cubit<MediaDownloadState> {
   final MediaDownloadRepository _repository;
   StreamSubscription<DownloadProgressEvent>? _progressSubscription;
+  bool _pauseRequested = false;
 
   MediaDownloadCubit({required this._repository})
     : super(const MediaDownloadState());
@@ -18,9 +19,24 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
     try {
       final pong = _repository.ping();
       final version = _repository.engineVersion();
-      emit(state.copyWith(engineStatus: '$pong (v$version)'));
+      if (pong == 'pong' && version.isNotEmpty) {
+        emit(state.copyWith(isEngineReady: true, engineError: null));
+      } else {
+        emit(
+          state.copyWith(
+            isEngineReady: false,
+            engineError: 'Unexpected download engine response: $pong',
+          ),
+        );
+      }
     } catch (err) {
-      emit(state.copyWith(engineStatus: 'Engine error: $err'));
+      emit(
+        state.copyWith(
+          isEngineReady: false,
+          engineError:
+              'Download engine unavailable: ${_cleanErrorMessage(err)}',
+        ),
+      );
     }
 
     _progressSubscription?.cancel();
@@ -143,9 +159,11 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
       selection: selection,
     );
 
+    _pauseRequested = false;
     emit(
       state.copyWith(
         isStartingDownload: true,
+        isPaused: false,
         activeJobId: null,
         latestProgress: null,
         downloadError: null,
@@ -165,10 +183,24 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
     }
   }
 
+  Future<void> pauseDownload() async {
+    final jobId = state.activeJobId;
+    if (jobId == null || !state.canPause) return;
+
+    _pauseRequested = true;
+    try {
+      await _repository.cancelDownload(jobId);
+    } catch (err) {
+      _pauseRequested = false;
+      emit(state.copyWith(downloadError: _cleanErrorMessage(err)));
+    }
+  }
+
   Future<void> cancelDownload() async {
     final jobId = state.activeJobId;
     if (jobId == null || !state.canCancel) return;
 
+    _pauseRequested = false;
     try {
       await _repository.cancelDownload(jobId);
     } catch (err) {
@@ -180,7 +212,14 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
     final jobId = state.activeJobId;
     if (jobId == null || !state.canResume) return;
 
-    emit(state.copyWith(isStartingDownload: true, downloadError: null));
+    _pauseRequested = false;
+    emit(
+      state.copyWith(
+        isStartingDownload: true,
+        isPaused: false,
+        downloadError: null,
+      ),
+    );
     try {
       final resumedJobId = await _repository.resumeDownload(jobId);
       emit(
@@ -205,10 +244,31 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
       return;
     }
 
+    final isPauseEvent =
+        event.phase == DownloadPhase.canceled && _pauseRequested;
+    if (event.phase != DownloadPhase.canceled) {
+      _pauseRequested = false;
+    }
+
+    final effectiveEvent = isPauseEvent
+        ? DownloadProgressEvent(
+            jobId: event.jobId,
+            phase: event.phase,
+            downloadedBytes: event.downloadedBytes,
+            totalBytes: event.totalBytes,
+            isTotalEstimated: event.isTotalEstimated,
+            speedBytesPerSec: null,
+            etaSeconds: null,
+            outputPath: event.outputPath,
+            message: 'Download paused. Click Resume to continue.',
+          )
+        : event;
+
     emit(
       state.copyWith(
         activeJobId: activeId ?? event.jobId,
-        latestProgress: event,
+        isPaused: isPauseEvent,
+        latestProgress: effectiveEvent,
         downloadError: event.phase == DownloadPhase.failed
             ? (event.message ?? 'Download failed.')
             : null,
