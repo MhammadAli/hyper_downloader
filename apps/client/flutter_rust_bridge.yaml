@@ -1,0 +1,3 @@
+rust_input: crate::api
+rust_root: ../../rust/crates/engine_ffi/
+dart_output: lib/core/bridge/

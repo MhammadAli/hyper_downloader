@@ -1,0 +1,18 @@
+# Rust build artifacts
+rust/target/
+
+# Prototype binaries & downloaded test media
+tools/windows_media_prototype/bin/
+tools/windows_media_prototype/output/*
+!tools/windows_media_prototype/output/.gitkeep
+
+# Media & archive binaries
+*.exe
+*.dll
+*.zip
+*.mp4
+*.mkv
+*.webm
+*.m4a
+*.part
+*.ytdl
