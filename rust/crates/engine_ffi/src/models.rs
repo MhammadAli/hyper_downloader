@@ -356,3 +356,58 @@ pub struct PlaylistProgressEvent {
     pub playlist_output_dir: Option<String>,
     pub message: Option<String>,
 }
+
+/// Truthful aggregation state for pre-download playlist total size estimation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlaylistSizeStatus {
+    Idle,
+    Calculating,
+    Exact,
+    Estimated,
+    Partial,
+    Unknown,
+    Failed,
+    Canceled,
+}
+
+/// Resolved per-item quality and expected size metadata prior to download.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaylistItemSizeInfo {
+    pub order_index: u32,
+    pub selected_quality: Option<String>,
+    pub expected_size_bytes: Option<u64>,
+    pub size_accuracy: FileSizeAccuracy,
+    pub display_size: String,
+    pub failed: bool,
+    pub error_message: Option<String>,
+}
+
+/// Aggregate playlist size estimate synchronized with selected mode & quality cap.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaylistSizeEstimate {
+    pub estimation_id: String,
+    pub playlist_id: String,
+    pub media_mode: PlaylistMediaMode,
+    pub quality_cap: PlaylistQualityCap,
+    pub status: PlaylistSizeStatus,
+    pub known_total_bytes: u64,
+    pub total_entries_count: u32,
+    pub unavailable_count: u32,
+    pub eligible_count: u32,
+    pub inspected_count: u32,
+    pub exact_count: u32,
+    pub estimated_count: u32,
+    pub unknown_count: u32,
+    pub failed_count: u32,
+    pub display_summary: String,
+    pub status_message: Option<String>,
+    pub item_sizes: Vec<PlaylistItemSizeInfo>,
+}
+
+/// Request payload to calculate/recalculate expected playlist size for a mode & cap.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EstimatePlaylistSizeRequest {
+    pub playlist: PlaylistInspection,
+    pub media_mode: PlaylistMediaMode,
+    pub quality_cap: PlaylistQualityCap,
+}

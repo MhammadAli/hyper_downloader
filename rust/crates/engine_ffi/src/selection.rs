@@ -935,7 +935,7 @@ pub fn format_display_size(bytes: Option<u64>, accuracy: FileSizeAccuracy) -> St
     }
 }
 
-fn format_bytes_human(bytes: u64) -> String {
+pub(crate) fn format_bytes_human(bytes: u64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = 1024.0 * 1024.0;
     const GB: f64 = 1024.0 * 1024.0 * 1024.0;
@@ -958,6 +958,8 @@ pub struct ResolvedPlaylistSelection {
     pub quality_label: String,
     pub container: String,
     pub audio_language: Option<AudioTrackMetadata>,
+    pub expected_size_bytes: Option<u64>,
+    pub size_accuracy: FileSizeAccuracy,
 }
 
 /// Selects the best playable option for an individually inspected playlist video
@@ -989,19 +991,34 @@ pub fn select_playlist_item_option(
                 .or_else(|| inspection.video_options.last())
                 .ok_or_else(|| "No playable video options available.".to_string())?;
 
-            let selection = match chosen.format_selection_strategy {
-                FormatSelectionStrategy::CombinedAudioVideo => {
-                    DownloadFormatSelection::single(&chosen.video_format_id)
-                }
+            let (selection, expected_size_bytes, size_accuracy) = match chosen
+                .format_selection_strategy
+            {
+                FormatSelectionStrategy::CombinedAudioVideo => (
+                    DownloadFormatSelection::single(&chosen.video_format_id),
+                    chosen.file_size_bytes,
+                    chosen.size_accuracy,
+                ),
                 FormatSelectionStrategy::PairVideoAndAudioWithFfmpeg => {
                     let audio_id = chosen.selected_audio_format_id.as_deref().ok_or_else(|| {
                         "Internal format pairing error: missing original audio format ID."
                             .to_string()
                     })?;
-                    DownloadFormatSelection::video_and_audio(
-                        &chosen.video_format_id,
-                        audio_id,
-                        &chosen.container,
+                    // Separate video/audio merges are always estimated due to container/mux overhead.
+                    let (bytes, accuracy) = match (chosen.file_size_bytes, chosen.size_accuracy) {
+                        (Some(b), FileSizeAccuracy::Exact | FileSizeAccuracy::Estimated) => {
+                            (Some(b), FileSizeAccuracy::Estimated)
+                        }
+                        _ => (None, FileSizeAccuracy::Unknown),
+                    };
+                    (
+                        DownloadFormatSelection::video_and_audio(
+                            &chosen.video_format_id,
+                            audio_id,
+                            &chosen.container,
+                        ),
+                        bytes,
+                        accuracy,
                     )
                 }
                 FormatSelectionStrategy::AudioOnlyStream => {
@@ -1029,6 +1046,8 @@ pub fn select_playlist_item_option(
                     .audio_language
                     .clone()
                     .or_else(|| inspection.original_audio.clone()),
+                expected_size_bytes,
+                size_accuracy,
             })
         }
         PlaylistMediaMode::AudioOnly => {
@@ -1049,6 +1068,8 @@ pub fn select_playlist_item_option(
                     .audio_language
                     .clone()
                     .or_else(|| inspection.original_audio.clone()),
+                expected_size_bytes: chosen.file_size_bytes,
+                size_accuracy: chosen.size_accuracy,
             })
         }
     }

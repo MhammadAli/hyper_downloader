@@ -38,6 +38,8 @@ class MediaDownloadState extends Equatable {
   final double? activePlaylistSpeedBytesPerSec;
   final BigInt? activePlaylistEtaSeconds;
   final String? playlistStatusMessage;
+  final PlaylistSizeEstimate? playlistSizeEstimate;
+  final String? activeSizeEstimationId;
 
   const MediaDownloadState({
     this.isEngineReady = false,
@@ -65,6 +67,8 @@ class MediaDownloadState extends Equatable {
     this.activePlaylistSpeedBytesPerSec,
     this.activePlaylistEtaSeconds,
     this.playlistStatusMessage,
+    this.playlistSizeEstimate,
+    this.activeSizeEstimationId,
   });
 
   bool get isSingleVideoTarget =>
@@ -105,6 +109,22 @@ class MediaDownloadState extends Equatable {
       playlistSession != null &&
       !isPlaylistRunning &&
       playlistSession!.failedCount > 0;
+
+  bool get isCalculatingPlaylistSize =>
+      playlistSizeEstimate?.status == PlaylistSizeStatus.calculating;
+
+  bool get canCancelPlaylistSize =>
+      isCalculatingPlaylistSize &&
+      (playlistSizeEstimate?.estimationId.isNotEmpty ?? false);
+
+  PlaylistItemSizeInfo? sizeInfoForItem(int orderIndex) {
+    final items = playlistSizeEstimate?.itemSizes;
+    if (items == null) return null;
+    for (final info in items) {
+      if (info.orderIndex == orderIndex) return info;
+    }
+    return null;
+  }
 
   PlaylistItemState? get activePlaylistItem {
     final session = playlistSession;
@@ -220,6 +240,8 @@ class MediaDownloadState extends Equatable {
     Object? activePlaylistSpeedBytesPerSec = _unset,
     Object? activePlaylistEtaSeconds = _unset,
     Object? playlistStatusMessage = _unset,
+    Object? playlistSizeEstimate = _unset,
+    Object? activeSizeEstimationId = _unset,
   }) {
     return MediaDownloadState(
       isEngineReady: isEngineReady ?? this.isEngineReady,
@@ -281,6 +303,12 @@ class MediaDownloadState extends Equatable {
       playlistStatusMessage: identical(playlistStatusMessage, _unset)
           ? this.playlistStatusMessage
           : playlistStatusMessage as String?,
+      playlistSizeEstimate: identical(playlistSizeEstimate, _unset)
+          ? this.playlistSizeEstimate
+          : playlistSizeEstimate as PlaylistSizeEstimate?,
+      activeSizeEstimationId: identical(activeSizeEstimationId, _unset)
+          ? this.activeSizeEstimationId
+          : activeSizeEstimationId as String?,
     );
   }
 
@@ -343,5 +371,23 @@ class MediaDownloadState extends Equatable {
     activePlaylistSpeedBytesPerSec,
     activePlaylistEtaSeconds,
     playlistStatusMessage,
+    playlistSizeEstimate?.estimationId,
+    playlistSizeEstimate?.playlistId,
+    playlistSizeEstimate?.mediaMode,
+    playlistSizeEstimate?.qualityCap,
+    playlistSizeEstimate?.status,
+    playlistSizeEstimate?.knownTotalBytes,
+    playlistSizeEstimate?.totalEntriesCount,
+    playlistSizeEstimate?.unavailableCount,
+    playlistSizeEstimate?.eligibleCount,
+    playlistSizeEstimate?.inspectedCount,
+    playlistSizeEstimate?.exactCount,
+    playlistSizeEstimate?.estimatedCount,
+    playlistSizeEstimate?.unknownCount,
+    playlistSizeEstimate?.failedCount,
+    playlistSizeEstimate?.displaySummary,
+    playlistSizeEstimate?.statusMessage,
+    playlistSizeEstimate?.itemSizes,
+    activeSizeEstimationId,
   ];
 }

@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 1815174008;
+  int get rustContentHash => 1579746299;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -83,7 +83,15 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiCancelPlaylistDownload({required String sessionId});
 
+  Future<void> crateApiCancelPlaylistSizeEstimation({
+    required String estimationId,
+  });
+
   String crateApiEngineVersion();
+
+  Future<PlaylistSizeEstimate> crateApiEstimatePlaylistSize({
+    required EstimatePlaylistSizeRequest request,
+  });
 
   Future<void> crateApiInitApp();
 
@@ -119,6 +127,8 @@ abstract class RustLibApi extends BaseApi {
   Stream<DownloadProgressEvent> crateApiSubscribeDownloadProgress();
 
   Stream<PlaylistProgressEvent> crateApiSubscribePlaylistProgress();
+
+  Stream<PlaylistSizeEstimate> crateApiSubscribePlaylistSizeEstimate();
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -189,12 +199,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiCancelPlaylistSizeEstimation({
+    required String estimationId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(estimationId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 3,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiCancelPlaylistSizeEstimationConstMeta,
+        argValues: [estimationId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiCancelPlaylistSizeEstimationConstMeta =>
+      const TaskConstMeta(
+        debugName: "cancel_playlist_size_estimation",
+        argNames: ["estimationId"],
+      );
+
+  @override
   String crateApiEngineVersion() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 3)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 4)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -211,6 +254,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "engine_version", argNames: []);
 
   @override
+  Future<PlaylistSizeEstimate> crateApiEstimatePlaylistSize({
+    required EstimatePlaylistSizeRequest request,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_estimate_playlist_size_request(
+            request,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 5,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_playlist_size_estimate,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiEstimatePlaylistSizeConstMeta,
+        argValues: [request],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiEstimatePlaylistSizeConstMeta =>
+      const TaskConstMeta(
+        debugName: "estimate_playlist_size",
+        argNames: ["request"],
+      );
+
+  @override
   Future<void> crateApiInitApp() {
     return handler.executeNormal(
       NormalTask(
@@ -219,7 +298,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 4,
+            funcId: 6,
             port: port_,
           );
         },
@@ -247,7 +326,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 7,
             port: port_,
           );
         },
@@ -275,7 +354,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 8,
             port: port_,
           );
         },
@@ -307,7 +386,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 9,
             port: port_,
           );
         },
@@ -339,7 +418,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 10,
             port: port_,
           );
         },
@@ -366,7 +445,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 9)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 11)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -392,7 +471,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 12,
             port: port_,
           );
         },
@@ -422,7 +501,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 13,
             port: port_,
           );
         },
@@ -455,7 +534,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 14,
             port: port_,
           );
         },
@@ -488,7 +567,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 15,
             port: port_,
           );
         },
@@ -521,7 +600,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 16,
             port: port_,
           );
         },
@@ -554,7 +633,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 15,
+              funcId: 17,
               port: port_,
             );
           },
@@ -589,7 +668,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 16,
+              funcId: 18,
               port: port_,
             );
           },
@@ -612,6 +691,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         argNames: ["sink"],
       );
 
+  @override
+  Stream<PlaylistSizeEstimate> crateApiSubscribePlaylistSizeEstimate() {
+    final sink = RustStreamSink<PlaylistSizeEstimate>();
+    unawaited(
+      handler.executeNormal(
+        NormalTask(
+          callFfi: (port_) {
+            final serializer = SseSerializer(generalizedFrbRustBinding);
+            sse_encode_StreamSink_playlist_size_estimate_Sse(sink, serializer);
+            pdeCallFfi(
+              generalizedFrbRustBinding,
+              serializer,
+              funcId: 19,
+              port: port_,
+            );
+          },
+          codec: SseCodec(
+            decodeSuccessData: sse_decode_unit,
+            decodeErrorData: sse_decode_String,
+          ),
+          constMeta: kCrateApiSubscribePlaylistSizeEstimateConstMeta,
+          argValues: [sink],
+          apiImpl: this,
+        ),
+      ),
+    );
+    return sink.stream;
+  }
+
+  TaskConstMeta get kCrateApiSubscribePlaylistSizeEstimateConstMeta =>
+      const TaskConstMeta(
+        debugName: "subscribe_playlist_size_estimate",
+        argNames: ["sink"],
+      );
+
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -628,6 +742,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   RustStreamSink<PlaylistProgressEvent>
   dco_decode_StreamSink_playlist_progress_event_Sse(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    throw UnimplementedError();
+  }
+
+  @protected
+  RustStreamSink<PlaylistSizeEstimate>
+  dco_decode_StreamSink_playlist_size_estimate_Sse(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     throw UnimplementedError();
   }
@@ -695,6 +816,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   bool dco_decode_box_autoadd_bool(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as bool;
+  }
+
+  @protected
+  EstimatePlaylistSizeRequest
+  dco_decode_box_autoadd_estimate_playlist_size_request(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_estimate_playlist_size_request(raw);
   }
 
   @protected
@@ -826,6 +954,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  EstimatePlaylistSizeRequest dco_decode_estimate_playlist_size_request(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return EstimatePlaylistSizeRequest(
+      playlist: dco_decode_playlist_inspection(arr[0]),
+      mediaMode: dco_decode_playlist_media_mode(arr[1]),
+      qualityCap: dco_decode_playlist_quality_cap(arr[2]),
+    );
+  }
+
+  @protected
   double dco_decode_f_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as double;
@@ -874,6 +1017,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>)
         .map(dco_decode_playlist_entry_summary)
+        .toList();
+  }
+
+  @protected
+  List<PlaylistItemSizeInfo> dco_decode_list_playlist_item_size_info(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_playlist_item_size_info)
         .toList();
   }
 
@@ -1042,6 +1195,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlaylistItemSizeInfo dco_decode_playlist_item_size_info(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return PlaylistItemSizeInfo(
+      orderIndex: dco_decode_u_32(arr[0]),
+      selectedQuality: dco_decode_opt_String(arr[1]),
+      expectedSizeBytes: dco_decode_opt_box_autoadd_u_64(arr[2]),
+      sizeAccuracy: dco_decode_file_size_accuracy(arr[3]),
+      displaySize: dco_decode_String(arr[4]),
+      failed: dco_decode_bool(arr[5]),
+      errorMessage: dco_decode_opt_String(arr[6]),
+    );
+  }
+
+  @protected
   PlaylistItemState dco_decode_playlist_item_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1135,6 +1305,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       totalCount: dco_decode_u_32(arr[14]),
       items: dco_decode_list_playlist_item_state(arr[15]),
     );
+  }
+
+  @protected
+  PlaylistSizeEstimate dco_decode_playlist_size_estimate(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 17)
+      throw Exception('unexpected arr length: expect 17 but see ${arr.length}');
+    return PlaylistSizeEstimate(
+      estimationId: dco_decode_String(arr[0]),
+      playlistId: dco_decode_String(arr[1]),
+      mediaMode: dco_decode_playlist_media_mode(arr[2]),
+      qualityCap: dco_decode_playlist_quality_cap(arr[3]),
+      status: dco_decode_playlist_size_status(arr[4]),
+      knownTotalBytes: dco_decode_u_64(arr[5]),
+      totalEntriesCount: dco_decode_u_32(arr[6]),
+      unavailableCount: dco_decode_u_32(arr[7]),
+      eligibleCount: dco_decode_u_32(arr[8]),
+      inspectedCount: dco_decode_u_32(arr[9]),
+      exactCount: dco_decode_u_32(arr[10]),
+      estimatedCount: dco_decode_u_32(arr[11]),
+      unknownCount: dco_decode_u_32(arr[12]),
+      failedCount: dco_decode_u_32(arr[13]),
+      displaySummary: dco_decode_String(arr[14]),
+      statusMessage: dco_decode_opt_String(arr[15]),
+      itemSizes: dco_decode_list_playlist_item_size_info(arr[16]),
+    );
+  }
+
+  @protected
+  PlaylistSizeStatus dco_decode_playlist_size_status(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return PlaylistSizeStatus.values[raw as int];
   }
 
   @protected
@@ -1257,6 +1460,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RustStreamSink<PlaylistSizeEstimate>
+  sse_decode_StreamSink_playlist_size_estimate_Sse(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    throw UnimplementedError('Unreachable ()');
+  }
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_list_prim_u_8_strict(deserializer);
@@ -1342,6 +1554,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   bool sse_decode_box_autoadd_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bool(deserializer));
+  }
+
+  @protected
+  EstimatePlaylistSizeRequest
+  sse_decode_box_autoadd_estimate_playlist_size_request(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_estimate_playlist_size_request(deserializer));
   }
 
   @protected
@@ -1507,6 +1728,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  EstimatePlaylistSizeRequest sse_decode_estimate_playlist_size_request(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_playlist = sse_decode_playlist_inspection(deserializer);
+    var var_mediaMode = sse_decode_playlist_media_mode(deserializer);
+    var var_qualityCap = sse_decode_playlist_quality_cap(deserializer);
+    return EstimatePlaylistSizeRequest(
+      playlist: var_playlist,
+      mediaMode: var_mediaMode,
+      qualityCap: var_qualityCap,
+    );
+  }
+
+  @protected
   double sse_decode_f_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getFloat64();
@@ -1581,6 +1817,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <PlaylistEntrySummary>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_playlist_entry_summary(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<PlaylistItemSizeInfo> sse_decode_list_playlist_item_size_info(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <PlaylistItemSizeInfo>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_playlist_item_size_info(deserializer));
     }
     return ans_;
   }
@@ -1842,6 +2092,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlaylistItemSizeInfo sse_decode_playlist_item_size_info(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_orderIndex = sse_decode_u_32(deserializer);
+    var var_selectedQuality = sse_decode_opt_String(deserializer);
+    var var_expectedSizeBytes = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_sizeAccuracy = sse_decode_file_size_accuracy(deserializer);
+    var var_displaySize = sse_decode_String(deserializer);
+    var var_failed = sse_decode_bool(deserializer);
+    var var_errorMessage = sse_decode_opt_String(deserializer);
+    return PlaylistItemSizeInfo(
+      orderIndex: var_orderIndex,
+      selectedQuality: var_selectedQuality,
+      expectedSizeBytes: var_expectedSizeBytes,
+      sizeAccuracy: var_sizeAccuracy,
+      displaySize: var_displaySize,
+      failed: var_failed,
+      errorMessage: var_errorMessage,
+    );
+  }
+
+  @protected
   PlaylistItemState sse_decode_playlist_item_state(
     SseDeserializer deserializer,
   ) {
@@ -1995,6 +2268,58 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       totalCount: var_totalCount,
       items: var_items,
     );
+  }
+
+  @protected
+  PlaylistSizeEstimate sse_decode_playlist_size_estimate(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_estimationId = sse_decode_String(deserializer);
+    var var_playlistId = sse_decode_String(deserializer);
+    var var_mediaMode = sse_decode_playlist_media_mode(deserializer);
+    var var_qualityCap = sse_decode_playlist_quality_cap(deserializer);
+    var var_status = sse_decode_playlist_size_status(deserializer);
+    var var_knownTotalBytes = sse_decode_u_64(deserializer);
+    var var_totalEntriesCount = sse_decode_u_32(deserializer);
+    var var_unavailableCount = sse_decode_u_32(deserializer);
+    var var_eligibleCount = sse_decode_u_32(deserializer);
+    var var_inspectedCount = sse_decode_u_32(deserializer);
+    var var_exactCount = sse_decode_u_32(deserializer);
+    var var_estimatedCount = sse_decode_u_32(deserializer);
+    var var_unknownCount = sse_decode_u_32(deserializer);
+    var var_failedCount = sse_decode_u_32(deserializer);
+    var var_displaySummary = sse_decode_String(deserializer);
+    var var_statusMessage = sse_decode_opt_String(deserializer);
+    var var_itemSizes = sse_decode_list_playlist_item_size_info(deserializer);
+    return PlaylistSizeEstimate(
+      estimationId: var_estimationId,
+      playlistId: var_playlistId,
+      mediaMode: var_mediaMode,
+      qualityCap: var_qualityCap,
+      status: var_status,
+      knownTotalBytes: var_knownTotalBytes,
+      totalEntriesCount: var_totalEntriesCount,
+      unavailableCount: var_unavailableCount,
+      eligibleCount: var_eligibleCount,
+      inspectedCount: var_inspectedCount,
+      exactCount: var_exactCount,
+      estimatedCount: var_estimatedCount,
+      unknownCount: var_unknownCount,
+      failedCount: var_failedCount,
+      displaySummary: var_displaySummary,
+      statusMessage: var_statusMessage,
+      itemSizes: var_itemSizes,
+    );
+  }
+
+  @protected
+  PlaylistSizeStatus sse_decode_playlist_size_status(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return PlaylistSizeStatus.values[inner];
   }
 
   @protected
@@ -2157,6 +2482,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_StreamSink_playlist_size_estimate_Sse(
+    RustStreamSink<PlaylistSizeEstimate> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(
+      self.setupAndSerialize(
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_playlist_size_estimate,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+      ),
+      serializer,
+    );
+  }
+
+  @protected
   void sse_encode_String(String self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_u_8_strict(utf8.encoder.convert(self), serializer);
@@ -2224,6 +2566,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bool(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_estimate_playlist_size_request(
+    EstimatePlaylistSizeRequest self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_estimate_playlist_size_request(self, serializer);
   }
 
   @protected
@@ -2365,6 +2716,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_estimate_playlist_size_request(
+    EstimatePlaylistSizeRequest self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_playlist_inspection(self.playlist, serializer);
+    sse_encode_playlist_media_mode(self.mediaMode, serializer);
+    sse_encode_playlist_quality_cap(self.qualityCap, serializer);
+  }
+
+  @protected
   void sse_encode_f_64(double self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putFloat64(self);
@@ -2436,6 +2798,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_playlist_entry_summary(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_playlist_item_size_info(
+    List<PlaylistItemSizeInfo> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_playlist_item_size_info(item, serializer);
     }
   }
 
@@ -2662,6 +3036,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_playlist_item_size_info(
+    PlaylistItemSizeInfo self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self.orderIndex, serializer);
+    sse_encode_opt_String(self.selectedQuality, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.expectedSizeBytes, serializer);
+    sse_encode_file_size_accuracy(self.sizeAccuracy, serializer);
+    sse_encode_String(self.displaySize, serializer);
+    sse_encode_bool(self.failed, serializer);
+    sse_encode_opt_String(self.errorMessage, serializer);
+  }
+
+  @protected
   void sse_encode_playlist_item_state(
     PlaylistItemState self,
     SseSerializer serializer,
@@ -2767,6 +3156,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_32(self.skippedCount, serializer);
     sse_encode_u_32(self.totalCount, serializer);
     sse_encode_list_playlist_item_state(self.items, serializer);
+  }
+
+  @protected
+  void sse_encode_playlist_size_estimate(
+    PlaylistSizeEstimate self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.estimationId, serializer);
+    sse_encode_String(self.playlistId, serializer);
+    sse_encode_playlist_media_mode(self.mediaMode, serializer);
+    sse_encode_playlist_quality_cap(self.qualityCap, serializer);
+    sse_encode_playlist_size_status(self.status, serializer);
+    sse_encode_u_64(self.knownTotalBytes, serializer);
+    sse_encode_u_32(self.totalEntriesCount, serializer);
+    sse_encode_u_32(self.unavailableCount, serializer);
+    sse_encode_u_32(self.eligibleCount, serializer);
+    sse_encode_u_32(self.inspectedCount, serializer);
+    sse_encode_u_32(self.exactCount, serializer);
+    sse_encode_u_32(self.estimatedCount, serializer);
+    sse_encode_u_32(self.unknownCount, serializer);
+    sse_encode_u_32(self.failedCount, serializer);
+    sse_encode_String(self.displaySummary, serializer);
+    sse_encode_opt_String(self.statusMessage, serializer);
+    sse_encode_list_playlist_item_size_info(self.itemSizes, serializer);
+  }
+
+  @protected
+  void sse_encode_playlist_size_status(
+    PlaylistSizeStatus self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected

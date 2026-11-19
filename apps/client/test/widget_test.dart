@@ -33,6 +33,8 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
       StreamController<DownloadProgressEvent>.broadcast();
   final StreamController<PlaylistProgressEvent> playlistProgressController =
       StreamController<PlaylistProgressEvent>.broadcast();
+  final StreamController<PlaylistSizeEstimate> playlistSizeController =
+      StreamController<PlaylistSizeEstimate>.broadcast();
 
   StartDownloadRequest? lastStartRequest;
   String? lastCanceledJobId;
@@ -42,6 +44,7 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
   String? lastResumedPlaylistId;
   String? lastCanceledPlaylistId;
   String? lastRetriedPlaylistId;
+  String? lastCanceledSizeEstimationId;
   bool shouldFailInspection = false;
   bool returnMissingAudio = false;
   String sampleTitle = 'Multi-Audio Test Presentation';
@@ -295,9 +298,122 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
   Stream<PlaylistProgressEvent> watchPlaylistProgress() =>
       playlistProgressController.stream;
 
+  @override
+  Future<PlaylistSizeEstimate> estimatePlaylistSize(
+    EstimatePlaylistSizeRequest request,
+  ) async {
+    if (request.mediaMode == PlaylistMediaMode.audioOnly) {
+      return PlaylistSizeEstimate(
+        estimationId: 'est-audio',
+        playlistId: request.playlist.id,
+        mediaMode: request.mediaMode,
+        qualityCap: request.qualityCap,
+        status: PlaylistSizeStatus.exact,
+        knownTotalBytes: BigInt.from(8388608),
+        totalEntriesCount: request.playlist.entries.length,
+        unavailableCount: 1,
+        eligibleCount: 2,
+        inspectedCount: 2,
+        exactCount: 2,
+        estimatedCount: 0,
+        unknownCount: 0,
+        failedCount: 0,
+        displaySummary: '8.00 MB (Exact)',
+        statusMessage: '2 accessible video(s) with exact sizes.',
+        itemSizes: [
+          PlaylistItemSizeInfo(
+            orderIndex: 0,
+            selectedQuality: 'M4A · Standard Quality (129 kbps)',
+            expectedSizeBytes: BigInt.from(4194304),
+            sizeAccuracy: FileSizeAccuracy.exact,
+            displaySize: '4.00 MB (Exact)',
+            failed: false,
+          ),
+          PlaylistItemSizeInfo(
+            orderIndex: 2,
+            selectedQuality: 'M4A · Standard Quality (129 kbps)',
+            expectedSizeBytes: BigInt.from(4194304),
+            sizeAccuracy: FileSizeAccuracy.exact,
+            displaySize: '4.00 MB (Exact)',
+            failed: false,
+          ),
+        ],
+      );
+    }
+
+    if (request.qualityCap == PlaylistQualityCap.upTo720P) {
+      return PlaylistSizeEstimate(
+        estimationId: 'est-720p',
+        playlistId: request.playlist.id,
+        mediaMode: request.mediaMode,
+        qualityCap: request.qualityCap,
+        status: PlaylistSizeStatus.partial,
+        knownTotalBytes: BigInt.from(31457280),
+        totalEntriesCount: request.playlist.entries.length,
+        unavailableCount: 1,
+        eligibleCount: 2,
+        inspectedCount: 2,
+        exactCount: 0,
+        estimatedCount: 1,
+        unknownCount: 1,
+        failedCount: 0,
+        displaySummary: 'At least 30.00 MB · 1 unknown',
+        statusMessage: 'At least 30.00 MB · 1 video(s) have unknown sizes.',
+        itemSizes: [
+          PlaylistItemSizeInfo(
+            orderIndex: 0,
+            selectedQuality: '720p MP4',
+            expectedSizeBytes: BigInt.from(31457280),
+            sizeAccuracy: FileSizeAccuracy.estimated,
+            displaySize: '~30.00 MB (Estimated)',
+            failed: false,
+          ),
+          const PlaylistItemSizeInfo(
+            orderIndex: 2,
+            selectedQuality: '720p MP4',
+            expectedSizeBytes: null,
+            sizeAccuracy: FileSizeAccuracy.unknown,
+            displaySize: 'Unknown size',
+            failed: false,
+          ),
+        ],
+      );
+    }
+
+    return PlaylistSizeEstimate(
+      estimationId: 'est-best',
+      playlistId: request.playlist.id,
+      mediaMode: request.mediaMode,
+      qualityCap: request.qualityCap,
+      status: PlaylistSizeStatus.calculating,
+      knownTotalBytes: BigInt.from(52428800),
+      totalEntriesCount: request.playlist.entries.length,
+      unavailableCount: 1,
+      eligibleCount: 2,
+      inspectedCount: 1,
+      exactCount: 0,
+      estimatedCount: 1,
+      unknownCount: 0,
+      failedCount: 0,
+      displaySummary: 'Calculating playlist size...',
+      statusMessage: 'Calculating sizes: 1 / 2 videos',
+      itemSizes: const [],
+    );
+  }
+
+  @override
+  Future<void> cancelPlaylistSizeEstimation(String estimationId) async {
+    lastCanceledSizeEstimationId = estimationId;
+  }
+
+  @override
+  Stream<PlaylistSizeEstimate> watchPlaylistSizeEstimate() =>
+      playlistSizeController.stream;
+
   Future<void> dispose() async {
     await progressController.close();
     await playlistProgressController.close();
+    await playlistSizeController.close();
   }
 }
 
@@ -587,20 +703,46 @@ void main() {
         expect(find.text('Skipped'), findsOneWidget);
         expect(find.byKey(const Key('playlist_items_card')), findsOneWidget);
 
+        // Verify initial calculating playlist size banner + cancel, then dynamic recalculation on mode & cap toggles.
+        expect(
+          find.byKey(const Key('playlist_size_summary_card')),
+          findsOneWidget,
+        );
+        expect(find.text('Calculating playlist size...'), findsOneWidget);
+        expect(find.text('Calculating sizes: 1 / 2 videos'), findsOneWidget);
+
+        await tester.ensureVisible(
+          find.byKey(const Key('cancel_size_estimation_button')),
+        );
+        await tester.tap(
+          find.byKey(const Key('cancel_size_estimation_button')),
+        );
+        await tester.pump();
+        expect(fakeRepo.lastCanceledSizeEstimationId, 'est-best');
+
         // Verify default mode & quality cap chips, toggle Audio Only and back.
         expect(find.text('Best Available'), findsOneWidget);
         expect(find.text('Up to 1080p'), findsOneWidget);
         expect(find.text('Up to 720p'), findsOneWidget);
         expect(find.text('Up to 480p'), findsOneWidget);
 
+        await tester.ensureVisible(find.text('Audio Only'));
         await tester.tap(find.text('Audio Only'));
         await tester.pumpAndSettle();
         expect(find.text('Up to 720p'), findsNothing);
+        expect(find.text('8.00 MB (Exact)'), findsOneWidget);
+        expect(find.text('2 exact'), findsOneWidget);
 
+        await tester.ensureVisible(find.text('Video with Sound'));
         await tester.tap(find.text('Video with Sound'));
         await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Up to 720p'));
         await tester.tap(find.text('Up to 720p'));
-        await tester.pump();
+        await tester.pumpAndSettle();
+        expect(find.text('At least 30.00 MB · 1 unknown'), findsOneWidget);
+        expect(find.text('2 included'), findsOneWidget);
+        expect(find.text('1 unknown'), findsOneWidget);
+        expect(find.text('1 skipped'), findsOneWidget);
 
         // Start playlist download.
         await tester.ensureVisible(
@@ -798,6 +940,32 @@ void main() {
 
         expect(find.textContaining('قائمة تشغيل تعليمية'), findsOneWidget);
         expect(find.textContaining('الدرس الأول'), findsOneWidget);
+      },
+    );
+
+    test(
+      'WindowsDesktopFileLauncher resolves Win32 Shell PIDL for files with spaces, brackets, and Unicode',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'hyperdl_reveal_test [PL123] ',
+        );
+        try {
+          final file = File(
+            '${tempDir.path}${Platform.pathSeparator}001 - Empty Out Your Pockets شفرة.mp4',
+          );
+          await file.writeAsBytes(const [0, 1, 2, 3]);
+          expect(canCreateShellItemIdListForFile(file.path), isTrue);
+
+          const launcher = WindowsDesktopFileLauncher();
+          expect(
+            await launcher.revealInFolder(
+              '${tempDir.path}${Platform.pathSeparator}missing_subfolder${Platform.pathSeparator}nope.mp4',
+            ),
+            isFalse,
+          );
+        } finally {
+          await tempDir.delete(recursive: true);
+        }
       },
     );
   });

@@ -275,6 +275,32 @@ class DownloadProgressEvent {
 /// Distinguishes single-format downloads from separate video+audio FFmpeg merges.
 enum DownloadSelectionKind { single, videoAndAudio }
 
+/// Request payload to calculate/recalculate expected playlist size for a mode & cap.
+class EstimatePlaylistSizeRequest {
+  final PlaylistInspection playlist;
+  final PlaylistMediaMode mediaMode;
+  final PlaylistQualityCap qualityCap;
+
+  const EstimatePlaylistSizeRequest({
+    required this.playlist,
+    required this.mediaMode,
+    required this.qualityCap,
+  });
+
+  @override
+  int get hashCode =>
+      playlist.hashCode ^ mediaMode.hashCode ^ qualityCap.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is EstimatePlaylistSizeRequest &&
+          runtimeType == other.runtimeType &&
+          playlist == other.playlist &&
+          mediaMode == other.mediaMode &&
+          qualityCap == other.qualityCap;
+}
+
 /// Precision level reported for a format's byte size.
 enum FileSizeAccuracy { exact, estimated, unknown }
 
@@ -463,6 +489,50 @@ class PlaylistInspection {
           providerName == other.providerName &&
           totalItemCount == other.totalItemCount &&
           entries == other.entries;
+}
+
+/// Resolved per-item quality and expected size metadata prior to download.
+class PlaylistItemSizeInfo {
+  final int orderIndex;
+  final String? selectedQuality;
+  final BigInt? expectedSizeBytes;
+  final FileSizeAccuracy sizeAccuracy;
+  final String displaySize;
+  final bool failed;
+  final String? errorMessage;
+
+  const PlaylistItemSizeInfo({
+    required this.orderIndex,
+    this.selectedQuality,
+    this.expectedSizeBytes,
+    required this.sizeAccuracy,
+    required this.displaySize,
+    required this.failed,
+    this.errorMessage,
+  });
+
+  @override
+  int get hashCode =>
+      orderIndex.hashCode ^
+      selectedQuality.hashCode ^
+      expectedSizeBytes.hashCode ^
+      sizeAccuracy.hashCode ^
+      displaySize.hashCode ^
+      failed.hashCode ^
+      errorMessage.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlaylistItemSizeInfo &&
+          runtimeType == other.runtimeType &&
+          orderIndex == other.orderIndex &&
+          selectedQuality == other.selectedQuality &&
+          expectedSizeBytes == other.expectedSizeBytes &&
+          sizeAccuracy == other.sizeAccuracy &&
+          displaySize == other.displaySize &&
+          failed == other.failed &&
+          errorMessage == other.errorMessage;
 }
 
 /// Per-item runtime and persisted status inside a playlist session.
@@ -722,6 +792,102 @@ class PlaylistSessionSnapshot {
           skippedCount == other.skippedCount &&
           totalCount == other.totalCount &&
           items == other.items;
+}
+
+/// Aggregate playlist size estimate synchronized with selected mode & quality cap.
+class PlaylistSizeEstimate {
+  final String estimationId;
+  final String playlistId;
+  final PlaylistMediaMode mediaMode;
+  final PlaylistQualityCap qualityCap;
+  final PlaylistSizeStatus status;
+  final BigInt knownTotalBytes;
+  final int totalEntriesCount;
+  final int unavailableCount;
+  final int eligibleCount;
+  final int inspectedCount;
+  final int exactCount;
+  final int estimatedCount;
+  final int unknownCount;
+  final int failedCount;
+  final String displaySummary;
+  final String? statusMessage;
+  final List<PlaylistItemSizeInfo> itemSizes;
+
+  const PlaylistSizeEstimate({
+    required this.estimationId,
+    required this.playlistId,
+    required this.mediaMode,
+    required this.qualityCap,
+    required this.status,
+    required this.knownTotalBytes,
+    required this.totalEntriesCount,
+    required this.unavailableCount,
+    required this.eligibleCount,
+    required this.inspectedCount,
+    required this.exactCount,
+    required this.estimatedCount,
+    required this.unknownCount,
+    required this.failedCount,
+    required this.displaySummary,
+    this.statusMessage,
+    required this.itemSizes,
+  });
+
+  @override
+  int get hashCode =>
+      estimationId.hashCode ^
+      playlistId.hashCode ^
+      mediaMode.hashCode ^
+      qualityCap.hashCode ^
+      status.hashCode ^
+      knownTotalBytes.hashCode ^
+      totalEntriesCount.hashCode ^
+      unavailableCount.hashCode ^
+      eligibleCount.hashCode ^
+      inspectedCount.hashCode ^
+      exactCount.hashCode ^
+      estimatedCount.hashCode ^
+      unknownCount.hashCode ^
+      failedCount.hashCode ^
+      displaySummary.hashCode ^
+      statusMessage.hashCode ^
+      itemSizes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlaylistSizeEstimate &&
+          runtimeType == other.runtimeType &&
+          estimationId == other.estimationId &&
+          playlistId == other.playlistId &&
+          mediaMode == other.mediaMode &&
+          qualityCap == other.qualityCap &&
+          status == other.status &&
+          knownTotalBytes == other.knownTotalBytes &&
+          totalEntriesCount == other.totalEntriesCount &&
+          unavailableCount == other.unavailableCount &&
+          eligibleCount == other.eligibleCount &&
+          inspectedCount == other.inspectedCount &&
+          exactCount == other.exactCount &&
+          estimatedCount == other.estimatedCount &&
+          unknownCount == other.unknownCount &&
+          failedCount == other.failedCount &&
+          displaySummary == other.displaySummary &&
+          statusMessage == other.statusMessage &&
+          itemSizes == other.itemSizes;
+}
+
+/// Truthful aggregation state for pre-download playlist total size estimation.
+enum PlaylistSizeStatus {
+  idle,
+  calculating,
+  exact,
+  estimated,
+  partial,
+  unknown,
+  failed,
+  canceled,
 }
 
 /// Request payload to start a single download job.

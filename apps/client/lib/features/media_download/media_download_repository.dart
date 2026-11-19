@@ -37,6 +37,14 @@ abstract class MediaDownloadRepository {
   });
 
   Stream<PlaylistProgressEvent> watchPlaylistProgress();
+
+  Future<PlaylistSizeEstimate> estimatePlaylistSize(
+    EstimatePlaylistSizeRequest request,
+  );
+
+  Future<void> cancelPlaylistSizeEstimation(String estimationId);
+
+  Stream<PlaylistSizeEstimate> watchPlaylistSizeEstimate();
 }
 
 /// Production FFI repository backed by `flutter_rust_bridge` v2 bindings.
@@ -106,4 +114,17 @@ class FrbMediaDownloadRepository implements MediaDownloadRepository {
   @override
   Stream<PlaylistProgressEvent> watchPlaylistProgress() =>
       bridge_api.subscribePlaylistProgress();
+
+  @override
+  Future<PlaylistSizeEstimate> estimatePlaylistSize(
+    EstimatePlaylistSizeRequest request,
+  ) => bridge_api.estimatePlaylistSize(request: request);
+
+  @override
+  Future<void> cancelPlaylistSizeEstimation(String estimationId) =>
+      bridge_api.cancelPlaylistSizeEstimation(estimationId: estimationId);
+
+  @override
+  Stream<PlaylistSizeEstimate> watchPlaylistSizeEstimate() =>
+      bridge_api.subscribePlaylistSizeEstimate();
 }

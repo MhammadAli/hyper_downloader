@@ -31,6 +31,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_StreamSink_playlist_progress_event_Sse(dynamic raw);
 
   @protected
+  RustStreamSink<PlaylistSizeEstimate>
+  dco_decode_StreamSink_playlist_size_estimate_Sse(dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
@@ -50,6 +54,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   bool dco_decode_box_autoadd_bool(dynamic raw);
+
+  @protected
+  EstimatePlaylistSizeRequest
+  dco_decode_box_autoadd_estimate_playlist_size_request(dynamic raw);
 
   @protected
   double dco_decode_box_autoadd_f_64(dynamic raw);
@@ -99,6 +107,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DownloadSelectionKind dco_decode_download_selection_kind(dynamic raw);
 
   @protected
+  EstimatePlaylistSizeRequest dco_decode_estimate_playlist_size_request(
+    dynamic raw,
+  );
+
+  @protected
   double dco_decode_f_64(dynamic raw);
 
   @protected
@@ -121,6 +134,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<PlaylistEntrySummary> dco_decode_list_playlist_entry_summary(
+    dynamic raw,
+  );
+
+  @protected
+  List<PlaylistItemSizeInfo> dco_decode_list_playlist_item_size_info(
     dynamic raw,
   );
 
@@ -187,6 +205,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlaylistInspection dco_decode_playlist_inspection(dynamic raw);
 
   @protected
+  PlaylistItemSizeInfo dco_decode_playlist_item_size_info(dynamic raw);
+
+  @protected
   PlaylistItemState dco_decode_playlist_item_state(dynamic raw);
 
   @protected
@@ -203,6 +224,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlaylistSessionSnapshot dco_decode_playlist_session_snapshot(dynamic raw);
+
+  @protected
+  PlaylistSizeEstimate dco_decode_playlist_size_estimate(dynamic raw);
+
+  @protected
+  PlaylistSizeStatus dco_decode_playlist_size_status(dynamic raw);
 
   @protected
   StartDownloadRequest dco_decode_start_download_request(dynamic raw);
@@ -249,6 +276,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RustStreamSink<PlaylistSizeEstimate>
+  sse_decode_StreamSink_playlist_size_estimate_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
@@ -276,6 +309,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
+
+  @protected
+  EstimatePlaylistSizeRequest
+  sse_decode_box_autoadd_estimate_playlist_size_request(
+    SseDeserializer deserializer,
+  );
 
   @protected
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
@@ -339,6 +378,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  EstimatePlaylistSizeRequest sse_decode_estimate_playlist_size_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
@@ -369,6 +413,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<PlaylistEntrySummary> sse_decode_list_playlist_entry_summary(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<PlaylistItemSizeInfo> sse_decode_list_playlist_item_size_info(
     SseDeserializer deserializer,
   );
 
@@ -449,6 +498,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  PlaylistItemSizeInfo sse_decode_playlist_item_size_info(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   PlaylistItemState sse_decode_playlist_item_state(
     SseDeserializer deserializer,
   );
@@ -475,6 +529,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlaylistSessionSnapshot sse_decode_playlist_session_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistSizeEstimate sse_decode_playlist_size_estimate(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistSizeStatus sse_decode_playlist_size_status(
     SseDeserializer deserializer,
   );
 
@@ -532,6 +596,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_StreamSink_playlist_size_estimate_Sse(
+    RustStreamSink<PlaylistSizeEstimate> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
@@ -563,6 +633,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_estimate_playlist_size_request(
+    EstimatePlaylistSizeRequest self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
@@ -637,6 +713,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_estimate_playlist_size_request(
+    EstimatePlaylistSizeRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
@@ -675,6 +757,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_playlist_entry_summary(
     List<PlaylistEntrySummary> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_playlist_item_size_info(
+    List<PlaylistItemSizeInfo> self,
     SseSerializer serializer,
   );
 
@@ -772,6 +860,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_playlist_item_size_info(
+    PlaylistItemSizeInfo self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_playlist_item_state(
     PlaylistItemState self,
     SseSerializer serializer,
@@ -804,6 +898,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_playlist_session_snapshot(
     PlaylistSessionSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_playlist_size_estimate(
+    PlaylistSizeEstimate self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_playlist_size_status(
+    PlaylistSizeStatus self,
     SseSerializer serializer,
   );
 

@@ -199,18 +199,28 @@ void main() {
         qualityCap: PlaylistQualityCap.bestAvailable,
       ),
     );
+    registerFallbackValue(
+      EstimatePlaylistSizeRequest(
+        playlist: _samplePlaylistInspection(),
+        mediaMode: PlaylistMediaMode.videoWithSound,
+        qualityCap: PlaylistQualityCap.bestAvailable,
+      ),
+    );
   });
 
   group('MediaDownloadCubit', () {
     late MockMediaDownloadRepository repo;
     late StreamController<DownloadProgressEvent> progressController;
     late StreamController<PlaylistProgressEvent> playlistProgressController;
+    late StreamController<PlaylistSizeEstimate> sizeEstimateController;
 
     setUp(() {
       repo = MockMediaDownloadRepository();
       progressController = StreamController<DownloadProgressEvent>.broadcast();
       playlistProgressController =
           StreamController<PlaylistProgressEvent>.broadcast();
+      sizeEstimateController =
+          StreamController<PlaylistSizeEstimate>.broadcast();
 
       when(() => repo.ping()).thenReturn('pong');
       when(() => repo.engineVersion()).thenReturn('0.1.0');
@@ -221,16 +231,49 @@ void main() {
         () => repo.watchPlaylistProgress(),
       ).thenAnswer((_) => playlistProgressController.stream);
       when(
+        () => repo.watchPlaylistSizeEstimate(),
+      ).thenAnswer((_) => sizeEstimateController.stream);
+      when(
         () => repo.loadSavedPlaylistSession(
           playlistId: any(named: 'playlistId'),
           outputDirectory: any(named: 'outputDirectory'),
         ),
       ).thenAnswer((_) async => null);
+      when(() => repo.estimatePlaylistSize(any())).thenAnswer((
+        invocation,
+      ) async {
+        final req =
+            invocation.positionalArguments.first as EstimatePlaylistSizeRequest;
+        return PlaylistSizeEstimate(
+          estimationId:
+              'est-default-${req.mediaMode.name}-${req.qualityCap.name}',
+          playlistId: req.playlist.id,
+          mediaMode: req.mediaMode,
+          qualityCap: req.qualityCap,
+          status: PlaylistSizeStatus.estimated,
+          knownTotalBytes: BigInt.from(15728640),
+          totalEntriesCount: req.playlist.entries.length,
+          unavailableCount: 1,
+          eligibleCount: 2,
+          inspectedCount: 2,
+          exactCount: 0,
+          estimatedCount: 2,
+          unknownCount: 0,
+          failedCount: 0,
+          displaySummary: '~15.00 MB (Estimated)',
+          statusMessage: '2 accessible video(s) (0 exact, 2 estimated/merged).',
+          itemSizes: const [],
+        );
+      });
+      when(
+        () => repo.cancelPlaylistSizeEstimation(any()),
+      ).thenAnswer((_) async {});
     });
 
     tearDown(() async {
       await progressController.close();
       await playlistProgressController.close();
+      await sizeEstimateController.close();
     });
 
     blocTest<MediaDownloadCubit, MediaDownloadState>(
@@ -764,6 +807,117 @@ void main() {
           cubit.state.playlistSession?.items[0].outputPath,
           r'F:\Downloads\Blender HQ\001 - First Talk.mp4',
         );
+      },
+    );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'dynamically recalculates playlist size on cap/mode changes and supports cancellation',
+      build: () {
+        final playlist = _samplePlaylistInspection();
+        when(() => repo.inspectUrl(any())).thenAnswer(
+          (_) async => UrlInspectionResult(
+            kind: InspectionTargetKind.playlist,
+            playlist: playlist,
+          ),
+        );
+        when(() => repo.estimatePlaylistSize(any())).thenAnswer((
+          invocation,
+        ) async {
+          final req =
+              invocation.positionalArguments.first
+                  as EstimatePlaylistSizeRequest;
+          if (req.mediaMode == PlaylistMediaMode.audioOnly) {
+            return PlaylistSizeEstimate(
+              estimationId: 'est-audio',
+              playlistId: playlist.id,
+              mediaMode: req.mediaMode,
+              qualityCap: req.qualityCap,
+              status: PlaylistSizeStatus.exact,
+              knownTotalBytes: BigInt.from(4194304),
+              totalEntriesCount: 3,
+              unavailableCount: 1,
+              eligibleCount: 2,
+              inspectedCount: 2,
+              exactCount: 2,
+              estimatedCount: 0,
+              unknownCount: 0,
+              failedCount: 0,
+              displaySummary: '4.00 MB (Exact)',
+              itemSizes: const [],
+            );
+          }
+          if (req.qualityCap == PlaylistQualityCap.upTo480P) {
+            return PlaylistSizeEstimate(
+              estimationId: 'est-480',
+              playlistId: playlist.id,
+              mediaMode: req.mediaMode,
+              qualityCap: req.qualityCap,
+              status: PlaylistSizeStatus.estimated,
+              knownTotalBytes: BigInt.from(20971520),
+              totalEntriesCount: 3,
+              unavailableCount: 1,
+              eligibleCount: 2,
+              inspectedCount: 2,
+              exactCount: 0,
+              estimatedCount: 2,
+              unknownCount: 0,
+              failedCount: 0,
+              displaySummary: '~20.00 MB (Estimated)',
+              itemSizes: const [],
+            );
+          }
+          return PlaylistSizeEstimate(
+            estimationId: 'est-best',
+            playlistId: playlist.id,
+            mediaMode: req.mediaMode,
+            qualityCap: req.qualityCap,
+            status: PlaylistSizeStatus.calculating,
+            knownTotalBytes: BigInt.zero,
+            totalEntriesCount: 3,
+            unavailableCount: 1,
+            eligibleCount: 2,
+            inspectedCount: 0,
+            exactCount: 0,
+            estimatedCount: 0,
+            unknownCount: 0,
+            failedCount: 0,
+            displaySummary: 'Calculating playlist size...',
+            statusMessage: 'Calculating sizes: 0 / 2 videos',
+            itemSizes: const [],
+          );
+        });
+        return MediaDownloadCubit(repository: repo)..initialize();
+      },
+      act: (cubit) async {
+        await cubit.analyzeUrl(
+          'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state.isCalculatingPlaylistSize, isTrue);
+
+        await cubit.cancelPlaylistSizeEstimation();
+        verify(() => repo.cancelPlaylistSizeEstimation('est-best')).called(1);
+
+        cubit.setPlaylistQualityCap(PlaylistQualityCap.upTo480P);
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          cubit.state.playlistSizeEstimate?.displaySummary,
+          '~20.00 MB (Estimated)',
+        );
+
+        cubit.setPlaylistMediaMode(PlaylistMediaMode.audioOnly);
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          cubit.state.playlistSizeEstimate?.status,
+          PlaylistSizeStatus.exact,
+        );
+        expect(
+          cubit.state.playlistSizeEstimate?.displaySummary,
+          '4.00 MB (Exact)',
+        );
+      },
+      verify: (_) {
+        verify(() => repo.estimatePlaylistSize(any())).called(3);
       },
     );
   });

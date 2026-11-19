@@ -2,11 +2,12 @@ use crate::frb_generated::StreamSink;
 pub use crate::models::{
     AudioQualityOption, AudioSelectionConfidence, AudioTrackMetadata, DiscoveredFormat,
     DownloadFormatSelection, DownloadPhase, DownloadProgressEvent, DownloadSelectionKind,
-    FileSizeAccuracy, FormatSelectionStrategy, InspectionTargetKind, MediaInspection,
-    PlaylistEntryAvailability, PlaylistEntrySummary, PlaylistEventKind, PlaylistInspection,
-    PlaylistItemState, PlaylistItemStatus, PlaylistMediaMode, PlaylistProgressEvent,
-    PlaylistQualityCap, PlaylistSessionSnapshot, StartDownloadRequest,
-    StartPlaylistDownloadRequest, StreamKind, UrlInspectionResult, VideoQualityOption,
+    EstimatePlaylistSizeRequest, FileSizeAccuracy, FormatSelectionStrategy, InspectionTargetKind,
+    MediaInspection, PlaylistEntryAvailability, PlaylistEntrySummary, PlaylistEventKind,
+    PlaylistInspection, PlaylistItemSizeInfo, PlaylistItemState, PlaylistItemStatus,
+    PlaylistMediaMode, PlaylistProgressEvent, PlaylistQualityCap, PlaylistSessionSnapshot,
+    PlaylistSizeEstimate, PlaylistSizeStatus, StartDownloadRequest, StartPlaylistDownloadRequest,
+    StreamKind, UrlInspectionResult, VideoQualityOption,
 };
 use crate::playlist::{inspect_url_async, PlaylistManager};
 use crate::yt_dlp::{inspect_media_async, DownloadManager};
@@ -131,6 +132,32 @@ pub async fn load_saved_playlist_session(
 /// Subscribes a Flutter stream sink to incremental playlist batch progress events.
 pub fn subscribe_playlist_progress(sink: StreamSink<PlaylistProgressEvent>) -> Result<(), String> {
     PlaylistManager::global().subscribe(sink);
+    Ok(())
+}
+
+/// Calculates or recalculates total expected playlist size using cached per-item format metadata.
+pub async fn estimate_playlist_size(
+    request: EstimatePlaylistSizeRequest,
+) -> Result<PlaylistSizeEstimate, String> {
+    PlaylistManager::global()
+        .estimate_playlist_size(request)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Cancels an active playlist size calculation while retaining already-cached item inspections.
+pub async fn cancel_playlist_size_estimation(estimation_id: String) -> Result<(), String> {
+    PlaylistManager::global()
+        .cancel_size_estimation(&estimation_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Subscribes a Flutter stream sink to progressive playlist total size estimation updates.
+pub fn subscribe_playlist_size_estimate(
+    sink: StreamSink<PlaylistSizeEstimate>,
+) -> Result<(), String> {
+    PlaylistManager::global().subscribe_size_estimates(sink);
     Ok(())
 }
 

@@ -10,7 +10,9 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
   final MediaDownloadRepository _repository;
   StreamSubscription<DownloadProgressEvent>? _progressSubscription;
   StreamSubscription<PlaylistProgressEvent>? _playlistProgressSubscription;
+  StreamSubscription<PlaylistSizeEstimate>? _sizeEstimateSubscription;
   final List<PlaylistProgressEvent> _pendingPlaylistEvents = [];
+  int _sizeEstimateRequestSeq = 0;
   bool _pauseRequested = false;
 
   MediaDownloadCubit({required this._repository})
@@ -60,6 +62,14 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
         );
       },
     );
+
+    _sizeEstimateSubscription?.cancel();
+    _sizeEstimateSubscription = _repository.watchPlaylistSizeEstimate().listen(
+      _onPlaylistSizeEstimate,
+      onError: (_) {
+        // Non-fatal: size summary card displays partial or unavailable status cleanly.
+      },
+    );
   }
 
   void updateUrl(String url) {
@@ -106,6 +116,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
           // Saved manifest loading is best-effort only.
         }
         _pendingPlaylistEvents.clear();
+        await _cancelActiveSizeEstimation();
         emit(
           state.copyWith(
             inspectionStatus: InspectionStatus.loaded,
@@ -133,8 +144,11 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
             playlistStatusMessage: savedSession != null
                 ? 'Loaded previous session progress.'
                 : null,
+            playlistSizeEstimate: null,
+            activeSizeEstimationId: null,
           ),
         );
+        unawaited(estimatePlaylistSize());
         return;
       }
 
@@ -149,6 +163,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
         return;
       }
 
+      await _cancelActiveSizeEstimation();
       final defaultVideoId = video.videoOptions.isNotEmpty
           ? video.videoOptions.first.videoFormatId
           : null;
@@ -178,6 +193,8 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
           activePlaylistSpeedBytesPerSec: null,
           activePlaylistEtaSeconds: null,
           playlistStatusMessage: null,
+          playlistSizeEstimate: null,
+          activeSizeEstimationId: null,
         ),
       );
     } catch (err) {
@@ -321,12 +338,121 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
 
   void setPlaylistMediaMode(PlaylistMediaMode mode) {
     if (state.isPlaylistRunning) return;
+    if (mode == state.playlistMediaMode) return;
     emit(state.copyWith(playlistMediaMode: mode));
+    if (state.isPlaylistTarget) {
+      unawaited(estimatePlaylistSize());
+    }
   }
 
   void setPlaylistQualityCap(PlaylistQualityCap cap) {
     if (state.isPlaylistRunning) return;
+    if (cap == state.playlistQualityCap) return;
     emit(state.copyWith(playlistQualityCap: cap));
+    if (state.isPlaylistTarget) {
+      unawaited(estimatePlaylistSize());
+    }
+  }
+
+  Future<void> estimatePlaylistSize() async {
+    final playlist = state.playlistInspection;
+    if (!state.isPlaylistTarget || playlist == null) return;
+
+    final seq = ++_sizeEstimateRequestSeq;
+    final mode = state.playlistMediaMode;
+    final cap = state.playlistQualityCap;
+    emit(state.copyWith(activeSizeEstimationId: null));
+
+    try {
+      final result = await _repository.estimatePlaylistSize(
+        EstimatePlaylistSizeRequest(
+          playlist: playlist,
+          mediaMode: mode,
+          qualityCap: cap,
+        ),
+      );
+      if (isClosed || seq != _sizeEstimateRequestSeq) return;
+      final existing = state.playlistSizeEstimate;
+      if (existing != null &&
+          existing.estimationId == result.estimationId &&
+          existing.status != PlaylistSizeStatus.calculating &&
+          result.status == PlaylistSizeStatus.calculating) {
+        return;
+      }
+      emit(
+        state.copyWith(
+          playlistSizeEstimate: result,
+          activeSizeEstimationId: result.estimationId,
+        ),
+      );
+    } catch (err) {
+      if (isClosed || seq != _sizeEstimateRequestSeq) return;
+      final unavailableCount = playlist.entries
+          .where((e) => e.availability != PlaylistEntryAvailability.available)
+          .length;
+      final eligibleCount = playlist.entries.length - unavailableCount;
+      emit(
+        state.copyWith(
+          activeSizeEstimationId: null,
+          playlistSizeEstimate: PlaylistSizeEstimate(
+            estimationId: 'err-$seq',
+            playlistId: playlist.id,
+            mediaMode: mode,
+            qualityCap: cap,
+            status: PlaylistSizeStatus.failed,
+            knownTotalBytes: BigInt.zero,
+            totalEntriesCount: playlist.entries.length,
+            unavailableCount: unavailableCount,
+            eligibleCount: eligibleCount,
+            inspectedCount: 0,
+            exactCount: 0,
+            estimatedCount: 0,
+            unknownCount: 0,
+            failedCount: eligibleCount,
+            displaySummary: 'Some video sizes could not be determined',
+            statusMessage: _cleanErrorMessage(err),
+            itemSizes: const [],
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> cancelPlaylistSizeEstimation() async {
+    await _cancelActiveSizeEstimation();
+  }
+
+  Future<void> _cancelActiveSizeEstimation() async {
+    _sizeEstimateRequestSeq++;
+    final activeId =
+        state.playlistSizeEstimate?.status == PlaylistSizeStatus.calculating
+        ? state.playlistSizeEstimate?.estimationId
+        : state.activeSizeEstimationId;
+    if (activeId == null || activeId.isEmpty) return;
+    try {
+      await _repository.cancelPlaylistSizeEstimation(activeId);
+    } catch (_) {
+      // Cancellation is best-effort.
+    }
+  }
+
+  void _onPlaylistSizeEstimate(PlaylistSizeEstimate estimate) {
+    if (!state.isPlaylistTarget ||
+        state.playlistInspection?.id != estimate.playlistId ||
+        estimate.mediaMode != state.playlistMediaMode ||
+        estimate.qualityCap != state.playlistQualityCap) {
+      return;
+    }
+    final expectedId = state.activeSizeEstimationId;
+    if (expectedId != null && expectedId != estimate.estimationId) {
+      return;
+    }
+    emit(
+      state.copyWith(
+        playlistSizeEstimate: estimate,
+        activeSizeEstimationId: estimate.estimationId,
+      ),
+    );
   }
 
   Future<void> startPlaylistDownload() async {
@@ -335,6 +461,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
       return;
     }
 
+    await _cancelActiveSizeEstimation();
     _pendingPlaylistEvents.clear();
     emit(
       state.copyWith(
@@ -682,6 +809,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
   Future<void> close() async {
     await _progressSubscription?.cancel();
     await _playlistProgressSubscription?.cancel();
+    await _sizeEstimateSubscription?.cancel();
     return super.close();
   }
 }

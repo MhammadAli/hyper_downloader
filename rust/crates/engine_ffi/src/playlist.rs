@@ -4,13 +4,14 @@
 
 use crate::frb_generated::StreamSink;
 use crate::models::{
-    AudioTrackMetadata, InspectionTargetKind, MediaInspection, PlaylistEntryAvailability,
-    PlaylistEntrySummary, PlaylistEventKind, PlaylistInspection, PlaylistItemState,
-    PlaylistItemStatus, PlaylistMediaMode, PlaylistProgressEvent, PlaylistQualityCap,
-    PlaylistSessionSnapshot, StartDownloadRequest, StartPlaylistDownloadRequest,
+    AudioTrackMetadata, EstimatePlaylistSizeRequest, FileSizeAccuracy, InspectionTargetKind,
+    MediaInspection, PlaylistEntryAvailability, PlaylistEntrySummary, PlaylistEventKind,
+    PlaylistInspection, PlaylistItemSizeInfo, PlaylistItemState, PlaylistItemStatus,
+    PlaylistMediaMode, PlaylistProgressEvent, PlaylistQualityCap, PlaylistSessionSnapshot,
+    PlaylistSizeEstimate, PlaylistSizeStatus, StartDownloadRequest, StartPlaylistDownloadRequest,
     UrlInspectionResult,
 };
-use crate::selection::select_playlist_item_option;
+use crate::selection::{format_bytes_human, format_display_size, select_playlist_item_option};
 use crate::win_job::ProcessTreeJob;
 use crate::yt_dlp::{
     build_download_args, build_inspect_args, configure_subprocess, extract_thumbnail_url,
@@ -19,20 +20,22 @@ use crate::yt_dlp::{
     ToolPaths,
 };
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{broadcast, Mutex, Notify};
+use tokio::sync::{broadcast, Mutex, Notify, Semaphore};
 use url::Url;
 use uuid::Uuid;
 
 const MANIFEST_FILENAME: &str = ".hyperdl_playlist_session.json";
 const STOP_WAIT_TIMEOUT_SECS: u64 = 5;
+const MAX_CONCURRENT_SIZE_INSPECTIONS: usize = 4;
 
 /// Returns `true` when `raw_url` targets a finite playlist rather than a single video/mix.
 pub fn is_playlist_url(raw_url: &str) -> bool {
@@ -827,6 +830,15 @@ async fn run_yt_dlp_download_once(
 }
 
 #[derive(Debug)]
+struct ActiveSizeEstimationRuntime {
+    estimation_id: String,
+    stop_notify: Arc<Notify>,
+    canceled_flag: Arc<AtomicBool>,
+    done_notify: Arc<Notify>,
+    is_running: bool,
+}
+
+#[derive(Debug)]
 struct ActivePlaylistRuntime {
     snapshot: PlaylistSessionSnapshot,
     item_stems: Vec<String>,
@@ -837,10 +849,13 @@ struct ActivePlaylistRuntime {
 }
 
 /// Coordinates sequential playlist batch execution, recovery manifests, pause/resume/cancel,
-/// and failure isolation/retry.
+/// failure isolation/retry, and cached pre-download total size estimation.
 pub struct PlaylistManager {
     tx: broadcast::Sender<PlaylistProgressEvent>,
+    size_tx: broadcast::Sender<PlaylistSizeEstimate>,
     runtime: Mutex<Option<ActivePlaylistRuntime>>,
+    inspection_cache: Arc<Mutex<HashMap<String, MediaInspection>>>,
+    size_runtime: Mutex<Option<ActiveSizeEstimationRuntime>>,
     executor: Arc<dyn PlaylistItemExecutor>,
 }
 
@@ -852,15 +867,23 @@ impl PlaylistManager {
 
     pub(crate) fn with_executor(executor: Arc<dyn PlaylistItemExecutor>) -> Arc<Self> {
         let (tx, _) = broadcast::channel(512);
+        let (size_tx, _) = broadcast::channel(256);
         Arc::new(Self {
             tx,
+            size_tx,
             runtime: Mutex::new(None),
+            inspection_cache: Arc::new(Mutex::new(HashMap::new())),
+            size_runtime: Mutex::new(None),
             executor,
         })
     }
 
     pub fn subscribe_broadcast(&self) -> broadcast::Receiver<PlaylistProgressEvent> {
         self.tx.subscribe()
+    }
+
+    pub fn subscribe_size_broadcast(&self) -> broadcast::Receiver<PlaylistSizeEstimate> {
+        self.size_tx.subscribe()
     }
 
     pub fn subscribe(&self, sink: StreamSink<PlaylistProgressEvent>) {
@@ -878,6 +901,250 @@ impl PlaylistManager {
                 }
             }
         });
+    }
+
+    pub fn subscribe_size_estimates(&self, sink: StreamSink<PlaylistSizeEstimate>) {
+        let mut rx = self.size_tx.subscribe();
+        shared_runtime().spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if sink.add(event).is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
+    /// Cancels any active size calculation while keeping cached item inspections intact.
+    pub async fn cancel_size_estimation(&self, estimation_id: &str) -> Result<(), EngineError> {
+        let (stop_notify, canceled_flag, done_notify) = {
+            let guard = self.size_runtime.lock().await;
+            let Some(active) = guard.as_ref() else {
+                return Ok(());
+            };
+            if active.estimation_id != estimation_id || !active.is_running {
+                return Ok(());
+            }
+            (
+                active.stop_notify.clone(),
+                active.canceled_flag.clone(),
+                active.done_notify.clone(),
+            )
+        };
+
+        canceled_flag.store(true, Ordering::SeqCst);
+        stop_notify.notify_waiters();
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(STOP_WAIT_TIMEOUT_SECS),
+            done_notify.notified(),
+        )
+        .await;
+        Ok(())
+    }
+
+    /// Calculates expected playlist total size by resolving the chosen format for each
+    /// accessible entry, reusing cached per-item inspections when mode or cap changes.
+    pub async fn estimate_playlist_size(
+        self: &Arc<Self>,
+        request: EstimatePlaylistSizeRequest,
+    ) -> Result<PlaylistSizeEstimate, EngineError> {
+        // Cancel any previous in-flight calculation cleanly without flushing cached items.
+        let prev = {
+            let guard = self.size_runtime.lock().await;
+            guard.as_ref().filter(|r| r.is_running).map(|r| {
+                (
+                    r.stop_notify.clone(),
+                    r.canceled_flag.clone(),
+                    r.done_notify.clone(),
+                )
+            })
+        };
+        if let Some((old_stop, old_canceled, old_done)) = prev {
+            old_canceled.store(true, Ordering::SeqCst);
+            old_stop.notify_waiters();
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(STOP_WAIT_TIMEOUT_SECS),
+                old_done.notified(),
+            )
+            .await;
+        }
+
+        let estimation_id = Uuid::new_v4().to_string();
+        let mut initial_results: HashMap<u32, Result<MediaInspection, String>> = HashMap::new();
+        let mut uncached_entries: Vec<PlaylistEntrySummary> = Vec::new();
+
+        {
+            let cache = self.inspection_cache.lock().await;
+            for entry in &request.playlist.entries {
+                if entry.availability != PlaylistEntryAvailability::Available {
+                    continue;
+                }
+                let key = inspection_cache_key(entry);
+                if let Some(hit) = cache.get(&key) {
+                    initial_results.insert(entry.order_index, Ok(hit.clone()));
+                } else {
+                    uncached_entries.push(entry.clone());
+                }
+            }
+        }
+
+        if uncached_entries.is_empty() {
+            let estimate = build_playlist_size_estimate(
+                &estimation_id,
+                &request.playlist,
+                request.media_mode,
+                request.quality_cap,
+                &initial_results,
+                false,
+                false,
+            );
+            let _ = self.size_tx.send(estimate.clone());
+            return Ok(estimate);
+        }
+
+        let paths = ToolPaths::resolve()?;
+        let stop_notify = Arc::new(Notify::new());
+        let canceled_flag = Arc::new(AtomicBool::new(false));
+        let done_notify = Arc::new(Notify::new());
+
+        {
+            let mut guard = self.size_runtime.lock().await;
+            *guard = Some(ActiveSizeEstimationRuntime {
+                estimation_id: estimation_id.clone(),
+                stop_notify: stop_notify.clone(),
+                canceled_flag: canceled_flag.clone(),
+                done_notify: done_notify.clone(),
+                is_running: true,
+            });
+        }
+
+        let initial_estimate = build_playlist_size_estimate(
+            &estimation_id,
+            &request.playlist,
+            request.media_mode,
+            request.quality_cap,
+            &initial_results,
+            true,
+            false,
+        );
+        let _ = self.size_tx.send(initial_estimate.clone());
+
+        let manager = self.clone();
+        let results_arc = Arc::new(Mutex::new(initial_results));
+        let playlist = request.playlist;
+        let media_mode = request.media_mode;
+        let quality_cap = request.quality_cap;
+        let eid = estimation_id.clone();
+
+        shared_runtime().spawn(async move {
+            let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_SIZE_INSPECTIONS));
+            let mut handles = Vec::with_capacity(uncached_entries.len());
+
+            for entry in uncached_entries {
+                let sem = semaphore.clone();
+                let mgr = manager.clone();
+                let res_map = results_arc.clone();
+                let pl = playlist.clone();
+                let paths_cloned = paths.clone();
+                let stop = stop_notify.clone();
+                let canceled = canceled_flag.clone();
+                let eid_task = eid.clone();
+
+                handles.push(tokio::spawn(async move {
+                    let permit = tokio::select! {
+                        acquired = sem.acquire_owned() => match acquired {
+                            Ok(p) => p,
+                            Err(_) => return,
+                        },
+                        () = stop.notified() => return,
+                    };
+                    if canceled.load(Ordering::SeqCst) {
+                        drop(permit);
+                        return;
+                    }
+
+                    let inspected = mgr
+                        .executor
+                        .inspect_item(&entry.url, &paths_cloned, stop.clone())
+                        .await;
+                    drop(permit);
+
+                    if canceled.load(Ordering::SeqCst) {
+                        return;
+                    }
+
+                    match inspected {
+                        Ok(media) => {
+                            let cache_key = inspection_cache_key(&entry);
+                            {
+                                let mut cache_guard = mgr.inspection_cache.lock().await;
+                                cache_guard.insert(cache_key, media.clone());
+                            }
+                            let mut map_guard = res_map.lock().await;
+                            map_guard.insert(entry.order_index, Ok(media));
+                            let snapshot = build_playlist_size_estimate(
+                                &eid_task,
+                                &pl,
+                                media_mode,
+                                quality_cap,
+                                &map_guard,
+                                true,
+                                false,
+                            );
+                            let _ = mgr.size_tx.send(snapshot);
+                        }
+                        Err(err) => {
+                            let mut map_guard = res_map.lock().await;
+                            map_guard.insert(entry.order_index, Err(err.to_string()));
+                            let snapshot = build_playlist_size_estimate(
+                                &eid_task,
+                                &pl,
+                                media_mode,
+                                quality_cap,
+                                &map_guard,
+                                true,
+                                false,
+                            );
+                            let _ = mgr.size_tx.send(snapshot);
+                        }
+                    }
+                }));
+            }
+
+            for handle in handles {
+                let _ = handle.await;
+            }
+
+            let was_canceled = canceled_flag.load(Ordering::SeqCst);
+            let final_snapshot = {
+                let map_guard = results_arc.lock().await;
+                build_playlist_size_estimate(
+                    &eid,
+                    &playlist,
+                    media_mode,
+                    quality_cap,
+                    &map_guard,
+                    false,
+                    was_canceled,
+                )
+            };
+
+            {
+                let mut rt_guard = manager.size_runtime.lock().await;
+                if let Some(active) = rt_guard.as_mut().filter(|r| r.estimation_id == eid) {
+                    active.is_running = false;
+                }
+            }
+            let _ = manager.size_tx.send(final_snapshot);
+            done_notify.notify_waiters();
+        });
+
+        Ok(initial_estimate)
     }
 
     /// Loads any saved playlist manifest and stores it as the active resumable session if idle.
@@ -1767,6 +2034,218 @@ fn make_item_event(
     }
 }
 
+fn inspection_cache_key(entry: &PlaylistEntrySummary) -> String {
+    if !entry.video_id.trim().is_empty() {
+        entry.video_id.trim().to_string()
+    } else {
+        entry.url.trim().to_string()
+    }
+}
+
+pub(crate) fn build_playlist_size_estimate(
+    estimation_id: &str,
+    playlist: &PlaylistInspection,
+    media_mode: PlaylistMediaMode,
+    quality_cap: PlaylistQualityCap,
+    results: &HashMap<u32, Result<MediaInspection, String>>,
+    is_calculating: bool,
+    was_canceled: bool,
+) -> PlaylistSizeEstimate {
+    let mut unavailable_count = 0u32;
+    let mut eligible_count = 0u32;
+    let mut inspected_count = 0u32;
+    let mut exact_count = 0u32;
+    let mut estimated_count = 0u32;
+    let mut unknown_count = 0u32;
+    let mut failed_count = 0u32;
+    let mut known_total_bytes = 0u64;
+    let mut item_sizes = Vec::with_capacity(playlist.entries.len());
+
+    for entry in &playlist.entries {
+        if entry.availability != PlaylistEntryAvailability::Available {
+            unavailable_count += 1;
+            continue;
+        }
+        eligible_count += 1;
+
+        match results.get(&entry.order_index) {
+            Some(Ok(inspection)) => {
+                inspected_count += 1;
+                match select_playlist_item_option(inspection, media_mode, quality_cap) {
+                    Ok(resolved) => {
+                        let display_size = format_display_size(
+                            resolved.expected_size_bytes,
+                            resolved.size_accuracy,
+                        );
+                        match (resolved.expected_size_bytes, resolved.size_accuracy) {
+                            (Some(bytes), FileSizeAccuracy::Exact) => {
+                                exact_count += 1;
+                                known_total_bytes = known_total_bytes.saturating_add(bytes);
+                            }
+                            (Some(bytes), FileSizeAccuracy::Estimated) => {
+                                estimated_count += 1;
+                                known_total_bytes = known_total_bytes.saturating_add(bytes);
+                            }
+                            _ => {
+                                unknown_count += 1;
+                            }
+                        }
+                        item_sizes.push(PlaylistItemSizeInfo {
+                            order_index: entry.order_index,
+                            selected_quality: Some(resolved.quality_label),
+                            expected_size_bytes: resolved.expected_size_bytes,
+                            size_accuracy: resolved.size_accuracy,
+                            display_size,
+                            failed: false,
+                            error_message: None,
+                        });
+                    }
+                    Err(err_msg) => {
+                        failed_count += 1;
+                        item_sizes.push(PlaylistItemSizeInfo {
+                            order_index: entry.order_index,
+                            selected_quality: None,
+                            expected_size_bytes: None,
+                            size_accuracy: FileSizeAccuracy::Unknown,
+                            display_size: "Unavailable".into(),
+                            failed: true,
+                            error_message: Some(err_msg),
+                        });
+                    }
+                }
+            }
+            Some(Err(err_msg)) => {
+                inspected_count += 1;
+                failed_count += 1;
+                item_sizes.push(PlaylistItemSizeInfo {
+                    order_index: entry.order_index,
+                    selected_quality: None,
+                    expected_size_bytes: None,
+                    size_accuracy: FileSizeAccuracy::Unknown,
+                    display_size: "Unavailable".into(),
+                    failed: true,
+                    error_message: Some(err_msg.clone()),
+                });
+            }
+            None => {}
+        }
+    }
+
+    let status = if is_calculating {
+        PlaylistSizeStatus::Calculating
+    } else if was_canceled {
+        PlaylistSizeStatus::Canceled
+    } else if eligible_count == 0 {
+        PlaylistSizeStatus::Unknown
+    } else if failed_count > 0 && exact_count == 0 && estimated_count == 0 {
+        PlaylistSizeStatus::Failed
+    } else if unknown_count > 0 || failed_count > 0 {
+        if known_total_bytes > 0 || exact_count > 0 || estimated_count > 0 {
+            PlaylistSizeStatus::Partial
+        } else {
+            PlaylistSizeStatus::Unknown
+        }
+    } else if estimated_count > 0 {
+        PlaylistSizeStatus::Estimated
+    } else if exact_count > 0 {
+        PlaylistSizeStatus::Exact
+    } else {
+        PlaylistSizeStatus::Unknown
+    };
+
+    let (display_summary, status_message) = match status {
+        PlaylistSizeStatus::Idle => ("Pending size check".to_string(), None),
+        PlaylistSizeStatus::Calculating => (
+            "Calculating playlist size...".to_string(),
+            Some(format!(
+                "Calculating sizes: {inspected_count} / {eligible_count} videos"
+            )),
+        ),
+        PlaylistSizeStatus::Canceled => {
+            let summary = if known_total_bytes > 0 {
+                format!("At least {} · canceled", format_bytes_human(known_total_bytes))
+            } else {
+                "Size calculation canceled".to_string()
+            };
+            (
+                summary,
+                Some(format!(
+                    "Canceled after inspecting {inspected_count} of {eligible_count} videos."
+                )),
+            )
+        }
+        PlaylistSizeStatus::Exact => (
+            format!("{} (Exact)", format_bytes_human(known_total_bytes)),
+            Some(format!(
+                "{eligible_count} accessible video(s) with exact sizes."
+            )),
+        ),
+        PlaylistSizeStatus::Estimated => (
+            format!("~{} (Estimated)", format_bytes_human(known_total_bytes)),
+            Some(format!(
+                "{eligible_count} accessible video(s) ({exact_count} exact, {estimated_count} estimated/merged)."
+            )),
+        ),
+        PlaylistSizeStatus::Partial => {
+            let human = format_bytes_human(known_total_bytes);
+            if unknown_count > 0 && failed_count == 0 {
+                (
+                    format!("At least {human} · {unknown_count} unknown"),
+                    Some(format!(
+                        "At least {human} · {unknown_count} video(s) have unknown sizes."
+                    )),
+                )
+            } else if failed_count > 0 && unknown_count == 0 {
+                (
+                    format!("At least {human} · {failed_count} failed"),
+                    Some("Some video sizes could not be determined.".to_string()),
+                )
+            } else {
+                (
+                    format!("At least {human} · {unknown_count} unknown, {failed_count} failed"),
+                    Some("Some video sizes are unknown or could not be determined.".to_string()),
+                )
+            }
+        }
+        PlaylistSizeStatus::Failed => (
+            "Some video sizes could not be determined".to_string(),
+            Some(format!(
+                "{failed_count} of {eligible_count} accessible video(s) failed size inspection."
+            )),
+        ),
+        PlaylistSizeStatus::Unknown => {
+            if eligible_count == 0 {
+                ("No accessible videos to size".to_string(), None)
+            } else {
+                (
+                    "Unknown size".to_string(),
+                    Some(format!("{unknown_count} video(s) have unknown sizes.")),
+                )
+            }
+        }
+    };
+
+    PlaylistSizeEstimate {
+        estimation_id: estimation_id.to_string(),
+        playlist_id: playlist.id.clone(),
+        media_mode,
+        quality_cap,
+        status,
+        known_total_bytes,
+        total_entries_count: playlist.entries.len() as u32,
+        unavailable_count,
+        eligible_count,
+        inspected_count,
+        exact_count,
+        estimated_count,
+        unknown_count,
+        failed_count,
+        display_summary,
+        status_message,
+        item_sizes,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2448,5 +2927,527 @@ mod tests {
         assert!(!is_transient_http_403(&EngineError::InvalidRequest(
             "HTTP Error 403".into()
         )));
+    }
+
+    fn make_muxed_inspection_fixture(id: &str, formats_json: &str) -> MediaInspection {
+        make_raw_inspection_json(id, &format!("Title {id}"), Some("en"), formats_json)
+    }
+
+    fn entry_for(idx: u32, id: &str, avail: PlaylistEntryAvailability) -> PlaylistEntrySummary {
+        PlaylistEntrySummary {
+            order_index: idx,
+            video_id: id.into(),
+            title: format!("Item {idx}"),
+            url: format!("https://www.youtube.com/watch?v={id}"),
+            uploader: Some("Creator".into()),
+            duration_seconds: Some(120.0),
+            thumbnail_url: None,
+            availability: avail,
+            availability_reason: if avail == PlaylistEntryAvailability::Available {
+                None
+            } else {
+                Some("Unavailable".into())
+            },
+        }
+    }
+
+    fn make_playlist_stub(id: &str, entries: Vec<PlaylistEntrySummary>) -> PlaylistInspection {
+        PlaylistInspection {
+            id: id.into(),
+            title: format!("Playlist {id}"),
+            uploader: Some("Channel".into()),
+            thumbnail_url: None,
+            webpage_url: format!("https://www.youtube.com/playlist?list={id}"),
+            provider_name: "Youtube".into(),
+            total_item_count: entries.len() as u32,
+            entries,
+        }
+    }
+
+    struct CountingInspectExecutor {
+        inspections: HashMap<String, MediaInspection>,
+        inspect_calls: AtomicU32,
+        delay_ms: u64,
+    }
+
+    impl PlaylistItemExecutor for CountingInspectExecutor {
+        fn inspect_item<'a>(
+            &'a self,
+            url: &'a str,
+            _paths: &'a ToolPaths,
+            stop_notify: Arc<Notify>,
+        ) -> Pin<Box<dyn Future<Output = Result<MediaInspection, EngineError>> + Send + 'a>>
+        {
+            Box::pin(async move {
+                self.inspect_calls.fetch_add(1, Ordering::SeqCst);
+                if self.delay_ms > 0 {
+                    tokio::select! {
+                        () = tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)) => {}
+                        () = stop_notify.notified() => {
+                            return Err(EngineError::InvalidRequest("Canceled".into()));
+                        }
+                    }
+                }
+                self.inspections
+                    .get(url)
+                    .cloned()
+                    .ok_or_else(|| EngineError::ProcessFailed {
+                        exit_code: Some(1),
+                        stderr: format!("Simulated failure for {url}"),
+                    })
+            })
+        }
+
+        fn download_item<'a>(
+            &'a self,
+            _paths: &'a ToolPaths,
+            _request: &'a StartDownloadRequest,
+            _output_template: &'a str,
+            _job_slot: Arc<Mutex<Option<Arc<ProcessTreeJob>>>>,
+            _stop_notify: Arc<Notify>,
+            _on_progress: Box<dyn Fn(ItemExecutionProgress) + Send + Sync + 'a>,
+        ) -> Pin<Box<dyn Future<Output = Result<String, EngineError>> + Send + 'a>> {
+            Box::pin(async move {
+                Err(EngineError::InvalidRequest(
+                    "Not implemented in test".into(),
+                ))
+            })
+        }
+    }
+
+    #[test]
+    fn size_aggregation_distinguishes_exact_approx_mixed_unknown_merged_and_unavailable() {
+        let playlist = make_playlist_stub(
+            "PLmix",
+            vec![
+                entry_for(0, "exactA", PlaylistEntryAvailability::Available),
+                entry_for(1, "exactB", PlaylistEntryAvailability::Available),
+                entry_for(2, "privX", PlaylistEntryAvailability::Private),
+            ],
+        );
+
+        let exact_fmt = r#"[
+            {"format_id": "18", "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a.40.2", "width": 640, "height": 360, "filesize": 1000000},
+            {"format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2", "tbr": 128.0, "filesize": 250000, "language": "en", "language_preference": 10}
+        ]"#;
+        let mut results = HashMap::new();
+        results.insert(0, Ok(make_muxed_inspection_fixture("exactA", exact_fmt)));
+        results.insert(1, Ok(make_muxed_inspection_fixture("exactB", exact_fmt)));
+
+        // All exact combined outputs + 1 unavailable -> Exact!
+        let exact_est = build_playlist_size_estimate(
+            "e1",
+            &playlist,
+            PlaylistMediaMode::VideoWithSound,
+            PlaylistQualityCap::BestAvailable,
+            &results,
+            false,
+            false,
+        );
+        assert_eq!(exact_est.status, PlaylistSizeStatus::Exact);
+        assert_eq!(exact_est.known_total_bytes, 2_000_000);
+        assert_eq!(exact_est.eligible_count, 2);
+        assert_eq!(exact_est.unavailable_count, 1);
+        assert_eq!(exact_est.exact_count, 2);
+        assert_eq!(exact_est.estimated_count, 0);
+        assert!(exact_est.display_summary.contains("(Exact)"));
+
+        // Audio-only uses exact audio stream sizes too (`250_000 * 2 = 500_000`).
+        let audio_est = build_playlist_size_estimate(
+            "e_aud",
+            &playlist,
+            PlaylistMediaMode::AudioOnly,
+            PlaylistQualityCap::BestAvailable,
+            &results,
+            false,
+            false,
+        );
+        assert_eq!(audio_est.status, PlaylistSizeStatus::Exact);
+        assert_eq!(audio_est.known_total_bytes, 500_000);
+
+        // Approximate muxed outputs -> Estimated.
+        let approx_fmt = r#"[
+            {"format_id": "18", "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a.40.2", "width": 640, "height": 360, "filesize_approx": 1500000}
+        ]"#;
+        results.insert(1, Ok(make_muxed_inspection_fixture("exactB", approx_fmt)));
+        let mixed_approx = build_playlist_size_estimate(
+            "e2",
+            &playlist,
+            PlaylistMediaMode::VideoWithSound,
+            PlaylistQualityCap::BestAvailable,
+            &results,
+            false,
+            false,
+        );
+        assert_eq!(mixed_approx.status, PlaylistSizeStatus::Estimated);
+        assert_eq!(mixed_approx.known_total_bytes, 2_500_000);
+        assert_eq!(mixed_approx.exact_count, 1);
+        assert_eq!(mixed_approx.estimated_count, 1);
+        assert!(mixed_approx.display_summary.contains("(Estimated)"));
+
+        // All approximate outputs -> Estimated.
+        results.insert(0, Ok(make_muxed_inspection_fixture("exactA", approx_fmt)));
+        let all_approx = build_playlist_size_estimate(
+            "e2b",
+            &playlist,
+            PlaylistMediaMode::VideoWithSound,
+            PlaylistQualityCap::BestAvailable,
+            &results,
+            false,
+            false,
+        );
+        assert_eq!(all_approx.status, PlaylistSizeStatus::Estimated);
+        assert_eq!(all_approx.known_total_bytes, 3_000_000);
+
+        // Separate video + audio merged output MUST be marked Estimated even if both have exact filesize.
+        let merged_fmt = r#"[
+            {"format_id": "137", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "width": 1920, "height": 1080, "filesize": 5000000},
+            {"format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2", "tbr": 128.0, "filesize": 500000, "language": "en", "language_preference": 10}
+        ]"#;
+        results.insert(0, Ok(make_muxed_inspection_fixture("exactA", exact_fmt)));
+        results.insert(1, Ok(make_muxed_inspection_fixture("exactB", merged_fmt)));
+        let merged_est = build_playlist_size_estimate(
+            "e3",
+            &playlist,
+            PlaylistMediaMode::VideoWithSound,
+            PlaylistQualityCap::BestAvailable,
+            &results,
+            false,
+            false,
+        );
+        assert_eq!(merged_est.status, PlaylistSizeStatus::Estimated);
+        assert_eq!(merged_est.known_total_bytes, 1_000_000 + 5_500_000);
+        assert_eq!(
+            merged_est.item_sizes[1].size_accuracy,
+            FileSizeAccuracy::Estimated
+        );
+        assert_eq!(
+            merged_est.item_sizes[1].expected_size_bytes,
+            Some(5_500_000)
+        );
+
+        // Unknown-size item mixed with known -> Partial ("At least ... · 1 unknown").
+        let unknown_fmt = r#"[
+            {"format_id": "18", "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a.40.2", "width": 640, "height": 360}
+        ]"#;
+        results.insert(1, Ok(make_muxed_inspection_fixture("exactB", unknown_fmt)));
+        let partial_est = build_playlist_size_estimate(
+            "e4",
+            &playlist,
+            PlaylistMediaMode::VideoWithSound,
+            PlaylistQualityCap::BestAvailable,
+            &results,
+            false,
+            false,
+        );
+        assert_eq!(partial_est.status, PlaylistSizeStatus::Partial);
+        assert_eq!(partial_est.known_total_bytes, 1_000_000);
+        assert_eq!(partial_est.unknown_count, 1);
+        assert!(partial_est.display_summary.starts_with("At least "));
+        assert!(partial_est.display_summary.contains("1 unknown"));
+
+        // All unknown -> Unknown.
+        results.insert(0, Ok(make_muxed_inspection_fixture("exactA", unknown_fmt)));
+        let all_unknown = build_playlist_size_estimate(
+            "e5",
+            &playlist,
+            PlaylistMediaMode::VideoWithSound,
+            PlaylistQualityCap::BestAvailable,
+            &results,
+            false,
+            false,
+        );
+        assert_eq!(all_unknown.status, PlaylistSizeStatus::Unknown);
+        assert_eq!(all_unknown.unknown_count, 2);
+    }
+
+    #[test]
+    fn size_calculation_follows_quality_caps_and_1080p_to_720p_fallback() {
+        let playlist = make_playlist_stub(
+            "PLcaps",
+            vec![
+                entry_for(0, "max1080", PlaylistEntryAvailability::Available),
+                entry_for(1, "max720", PlaylistEntryAvailability::Available),
+            ],
+        );
+
+        let multi_fmt = r#"[
+            {"format_id": "137", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "width": 1920, "height": 1080, "filesize": 10000000},
+            {"format_id": "136", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "width": 1280, "height": 720, "filesize": 4000000},
+            {"format_id": "135", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "width": 854, "height": 480, "filesize": 2000000},
+            {"format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2", "tbr": 128.0, "filesize": 1000000, "language": "en", "language_preference": 10}
+        ]"#;
+        let only_720_fmt = r#"[
+            {"format_id": "136", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "width": 1280, "height": 720, "filesize": 3000000},
+            {"format_id": "135", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "width": 854, "height": 480, "filesize": 1500000},
+            {"format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2", "tbr": 128.0, "filesize": 500000, "language": "en", "language_preference": 10}
+        ]"#;
+
+        let mut results = HashMap::new();
+        results.insert(0, Ok(make_muxed_inspection_fixture("max1080", multi_fmt)));
+        results.insert(1, Ok(make_muxed_inspection_fixture("max720", only_720_fmt)));
+
+        // Cap UpTo1080p: item 0 picks 1080p (10M+1M = 11M), item 1 falls back to 720p (3M+0.5M = 3.5M).
+        let cap1080 = build_playlist_size_estimate(
+            "c1080",
+            &playlist,
+            PlaylistMediaMode::VideoWithSound,
+            PlaylistQualityCap::UpTo1080p,
+            &results,
+            false,
+            false,
+        );
+        assert_eq!(cap1080.known_total_bytes, 14_500_000);
+        assert_eq!(
+            cap1080.item_sizes[1].selected_quality.as_deref(),
+            Some("720p MP4")
+        );
+
+        // Cap UpTo720p: item 0 drops to 720p (4M+1M = 5M), item 1 uses 720p (3.5M).
+        let cap720 = build_playlist_size_estimate(
+            "c720",
+            &playlist,
+            PlaylistMediaMode::VideoWithSound,
+            PlaylistQualityCap::UpTo720p,
+            &results,
+            false,
+            false,
+        );
+        assert_eq!(cap720.known_total_bytes, 8_500_000);
+
+        // Cap UpTo480p: item 0 uses 480p (3M), item 1 uses 480p (2M).
+        let cap480 = build_playlist_size_estimate(
+            "c480",
+            &playlist,
+            PlaylistMediaMode::VideoWithSound,
+            PlaylistQualityCap::UpTo480p,
+            &results,
+            false,
+            false,
+        );
+        assert_eq!(cap480.known_total_bytes, 5_000_000);
+    }
+
+    #[tokio::test]
+    async fn estimator_caches_inspections_recalculates_instantly_and_supports_large_playlists_and_cancel(
+    ) {
+        let mut entries = Vec::new();
+        let mut inspections = HashMap::new();
+        let fmt_json = r#"[
+            {"format_id": "136", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "width": 1280, "height": 720, "filesize": 4000000},
+            {"format_id": "135", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "width": 854, "height": 480, "filesize": 2000000},
+            {"format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2", "tbr": 128.0, "filesize": 1000000, "language": "en", "language_preference": 10}
+        ]"#;
+
+        for i in 0..90u32 {
+            let avail = if i < 5 {
+                PlaylistEntryAvailability::Private
+            } else {
+                PlaylistEntryAvailability::Available
+            };
+            let id = format!("large_{i}");
+            let e = entry_for(i, &id, avail);
+            if avail == PlaylistEntryAvailability::Available {
+                inspections.insert(e.url.clone(), make_muxed_inspection_fixture(&id, fmt_json));
+            }
+            entries.push(e);
+        }
+        let playlist = make_playlist_stub("PL90", entries);
+
+        let executor = Arc::new(CountingInspectExecutor {
+            inspections,
+            inspect_calls: AtomicU32::new(0),
+            delay_ms: 0,
+        });
+        let manager = PlaylistManager::with_executor(executor.clone());
+        let mut rx = manager.subscribe_size_broadcast();
+
+        let started = manager
+            .estimate_playlist_size(EstimatePlaylistSizeRequest {
+                playlist: playlist.clone(),
+                media_mode: PlaylistMediaMode::VideoWithSound,
+                quality_cap: PlaylistQualityCap::UpTo720p,
+            })
+            .await
+            .expect("estimate starts");
+        assert_eq!(started.status, PlaylistSizeStatus::Calculating);
+
+        let mut final_720 = None;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+        while tokio::time::Instant::now() < deadline {
+            let ev = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+                .await
+                .expect("size event")
+                .expect("channel open");
+            if ev.estimation_id == started.estimation_id
+                && ev.status != PlaylistSizeStatus::Calculating
+            {
+                final_720 = Some(ev);
+                break;
+            }
+        }
+        let final_720 = final_720.expect("final estimate received");
+        assert_eq!(final_720.status, PlaylistSizeStatus::Estimated);
+        assert_eq!(final_720.eligible_count, 85);
+        assert_eq!(final_720.unavailable_count, 5);
+        assert_eq!(final_720.known_total_bytes, 85 * 5_000_000);
+        assert_eq!(executor.inspect_calls.load(Ordering::SeqCst), 85);
+
+        // Changing cap to 480p and mode to AudioOnly must reuse cache with 0 extra executor calls!
+        let recapped_480 = manager
+            .estimate_playlist_size(EstimatePlaylistSizeRequest {
+                playlist: playlist.clone(),
+                media_mode: PlaylistMediaMode::VideoWithSound,
+                quality_cap: PlaylistQualityCap::UpTo480p,
+            })
+            .await
+            .expect("480p recalculation");
+        assert_eq!(recapped_480.status, PlaylistSizeStatus::Estimated);
+        assert_eq!(recapped_480.known_total_bytes, 85 * 3_000_000);
+        assert_eq!(executor.inspect_calls.load(Ordering::SeqCst), 85);
+
+        let audio_only = manager
+            .estimate_playlist_size(EstimatePlaylistSizeRequest {
+                playlist,
+                media_mode: PlaylistMediaMode::AudioOnly,
+                quality_cap: PlaylistQualityCap::BestAvailable,
+            })
+            .await
+            .expect("audio recalculation");
+        assert_eq!(audio_only.status, PlaylistSizeStatus::Exact);
+        assert_eq!(audio_only.known_total_bytes, 85 * 1_000_000);
+        assert_eq!(executor.inspect_calls.load(Ordering::SeqCst), 85);
+
+        // Test cancellation stops slow inspection cleanly.
+        let slow_playlist = make_playlist_stub(
+            "PLslow",
+            (0..6u32)
+                .map(|i| {
+                    entry_for(
+                        i,
+                        &format!("slow_{i}"),
+                        PlaylistEntryAvailability::Available,
+                    )
+                })
+                .collect(),
+        );
+        let slow_map: HashMap<String, MediaInspection> = slow_playlist
+            .entries
+            .iter()
+            .map(|e| {
+                (
+                    e.url.clone(),
+                    make_muxed_inspection_fixture(&e.video_id, fmt_json),
+                )
+            })
+            .collect();
+        let slow_exec = Arc::new(CountingInspectExecutor {
+            inspections: slow_map,
+            inspect_calls: AtomicU32::new(0),
+            delay_ms: 400,
+        });
+        let slow_mgr = PlaylistManager::with_executor(slow_exec);
+        let mut slow_rx = slow_mgr.subscribe_size_broadcast();
+
+        let slow_est = slow_mgr
+            .estimate_playlist_size(EstimatePlaylistSizeRequest {
+                playlist: slow_playlist,
+                media_mode: PlaylistMediaMode::VideoWithSound,
+                quality_cap: PlaylistQualityCap::BestAvailable,
+            })
+            .await
+            .expect("slow estimate starts");
+        slow_mgr
+            .cancel_size_estimation(&slow_est.estimation_id)
+            .await
+            .expect("cancel size estimation succeeds");
+
+        let mut saw_canceled = false;
+        let cancel_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while tokio::time::Instant::now() < cancel_deadline {
+            let ev = tokio::time::timeout(std::time::Duration::from_secs(2), slow_rx.recv())
+                .await
+                .expect("slow rx")
+                .expect("open");
+            if ev.estimation_id == slow_est.estimation_id
+                && ev.status == PlaylistSizeStatus::Canceled
+            {
+                saw_canceled = true;
+                break;
+            }
+        }
+        assert!(
+            saw_canceled,
+            "Cancellation must emit PlaylistSizeStatus::Canceled"
+        );
+    }
+
+    #[tokio::test]
+    async fn live_estimates_authorized_3_item_blender_hq_playlist_sizes() {
+        let url = "https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB";
+        let result = inspect_url_async(url)
+            .await
+            .expect("Blender HQ playlist inspection must succeed");
+        let playlist = result.playlist.expect("playlist payload");
+        assert_eq!(playlist.entries.len(), 3);
+
+        let manager = PlaylistManager::with_executor(Arc::new(YtDlpPlaylistExecutor));
+        let mut rx = manager.subscribe_size_broadcast();
+        let initial = manager
+            .estimate_playlist_size(EstimatePlaylistSizeRequest {
+                playlist: playlist.clone(),
+                media_mode: PlaylistMediaMode::VideoWithSound,
+                quality_cap: PlaylistQualityCap::UpTo480p,
+            })
+            .await
+            .expect("live size estimation starts");
+
+        let final_est = if initial.status == PlaylistSizeStatus::Calculating {
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
+            loop {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timed out waiting for live Blender HQ size estimate"
+                );
+                let ev = tokio::time::timeout(std::time::Duration::from_secs(45), rx.recv())
+                    .await
+                    .expect("rx timeout")
+                    .expect("open");
+                if ev.estimation_id == initial.estimation_id
+                    && ev.status != PlaylistSizeStatus::Calculating
+                {
+                    break ev;
+                }
+            }
+        } else {
+            initial
+        };
+
+        assert_eq!(final_est.eligible_count, 3);
+        assert_eq!(final_est.failed_count, 0);
+        assert_eq!(final_est.item_sizes.len(), 3);
+        assert!(
+            final_est.known_total_bytes > 0,
+            "Blender HQ items must yield non-zero real size metadata: {final_est:?}"
+        );
+        assert_ne!(
+            final_est.status,
+            PlaylistSizeStatus::Exact,
+            "Merged/approximate streams must not falsely claim exact final size"
+        );
+
+        // Verify cached AudioOnly recalculation finishes immediately and returns smaller valid audio total.
+        let audio_est = manager
+            .estimate_playlist_size(EstimatePlaylistSizeRequest {
+                playlist,
+                media_mode: PlaylistMediaMode::AudioOnly,
+                quality_cap: PlaylistQualityCap::BestAvailable,
+            })
+            .await
+            .expect("cached audio estimate");
+        assert_ne!(audio_est.status, PlaylistSizeStatus::Calculating);
+        assert_eq!(audio_est.item_sizes.len(), 3);
+        assert!(audio_est.known_total_bytes > 0);
+        assert!(audio_est.known_total_bytes < final_est.known_total_bytes);
     }
 }

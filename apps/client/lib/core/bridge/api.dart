@@ -73,3 +73,18 @@ Future<PlaylistSessionSnapshot?> loadSavedPlaylistSession({
 /// Subscribes a Flutter stream sink to incremental playlist batch progress events.
 Stream<PlaylistProgressEvent> subscribePlaylistProgress() =>
     RustLib.instance.api.crateApiSubscribePlaylistProgress();
+
+/// Calculates or recalculates total expected playlist size using cached per-item format metadata.
+Future<PlaylistSizeEstimate> estimatePlaylistSize({
+  required EstimatePlaylistSizeRequest request,
+}) => RustLib.instance.api.crateApiEstimatePlaylistSize(request: request);
+
+/// Cancels an active playlist size calculation while retaining already-cached item inspections.
+Future<void> cancelPlaylistSizeEstimation({required String estimationId}) =>
+    RustLib.instance.api.crateApiCancelPlaylistSizeEstimation(
+      estimationId: estimationId,
+    );
+
+/// Subscribes a Flutter stream sink to progressive playlist total size estimation updates.
+Stream<PlaylistSizeEstimate> subscribePlaylistSizeEstimate() =>
+    RustLib.instance.api.crateApiSubscribePlaylistSizeEstimate();
