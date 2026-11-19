@@ -27,6 +27,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_StreamSink_download_progress_event_Sse(dynamic raw);
 
   @protected
+  RustStreamSink<PlaylistProgressEvent>
+  dco_decode_StreamSink_playlist_progress_event_Sse(dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
@@ -51,9 +55,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double dco_decode_box_autoadd_f_64(dynamic raw);
 
   @protected
+  MediaInspection dco_decode_box_autoadd_media_inspection(dynamic raw);
+
+  @protected
+  PlaylistInspection dco_decode_box_autoadd_playlist_inspection(dynamic raw);
+
+  @protected
+  PlaylistItemStatus dco_decode_box_autoadd_playlist_item_status(dynamic raw);
+
+  @protected
+  PlaylistSessionSnapshot dco_decode_box_autoadd_playlist_session_snapshot(
+    dynamic raw,
+  );
+
+  @protected
   StartDownloadRequest dco_decode_box_autoadd_start_download_request(
     dynamic raw,
   );
+
+  @protected
+  StartPlaylistDownloadRequest
+  dco_decode_box_autoadd_start_playlist_download_request(dynamic raw);
 
   @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
@@ -89,10 +111,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int dco_decode_i_32(dynamic raw);
 
   @protected
+  InspectionTargetKind dco_decode_inspection_target_kind(dynamic raw);
+
+  @protected
   List<AudioQualityOption> dco_decode_list_audio_quality_option(dynamic raw);
 
   @protected
   List<DiscoveredFormat> dco_decode_list_discovered_format(dynamic raw);
+
+  @protected
+  List<PlaylistEntrySummary> dco_decode_list_playlist_entry_summary(
+    dynamic raw,
+  );
+
+  @protected
+  List<PlaylistItemState> dco_decode_list_playlist_item_state(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
@@ -118,13 +151,66 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double? dco_decode_opt_box_autoadd_f_64(dynamic raw);
 
   @protected
+  MediaInspection? dco_decode_opt_box_autoadd_media_inspection(dynamic raw);
+
+  @protected
+  PlaylistInspection? dco_decode_opt_box_autoadd_playlist_inspection(
+    dynamic raw,
+  );
+
+  @protected
+  PlaylistItemStatus? dco_decode_opt_box_autoadd_playlist_item_status(
+    dynamic raw,
+  );
+
+  @protected
+  PlaylistSessionSnapshot? dco_decode_opt_box_autoadd_playlist_session_snapshot(
+    dynamic raw,
+  );
+
+  @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
 
   @protected
   BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw);
 
   @protected
+  PlaylistEntryAvailability dco_decode_playlist_entry_availability(dynamic raw);
+
+  @protected
+  PlaylistEntrySummary dco_decode_playlist_entry_summary(dynamic raw);
+
+  @protected
+  PlaylistEventKind dco_decode_playlist_event_kind(dynamic raw);
+
+  @protected
+  PlaylistInspection dco_decode_playlist_inspection(dynamic raw);
+
+  @protected
+  PlaylistItemState dco_decode_playlist_item_state(dynamic raw);
+
+  @protected
+  PlaylistItemStatus dco_decode_playlist_item_status(dynamic raw);
+
+  @protected
+  PlaylistMediaMode dco_decode_playlist_media_mode(dynamic raw);
+
+  @protected
+  PlaylistProgressEvent dco_decode_playlist_progress_event(dynamic raw);
+
+  @protected
+  PlaylistQualityCap dco_decode_playlist_quality_cap(dynamic raw);
+
+  @protected
+  PlaylistSessionSnapshot dco_decode_playlist_session_snapshot(dynamic raw);
+
+  @protected
   StartDownloadRequest dco_decode_start_download_request(dynamic raw);
+
+  @protected
+  StartPlaylistDownloadRequest dco_decode_start_playlist_download_request(
+    dynamic raw,
+  );
 
   @protected
   StreamKind dco_decode_stream_kind(dynamic raw);
@@ -142,6 +228,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void dco_decode_unit(dynamic raw);
 
   @protected
+  UrlInspectionResult dco_decode_url_inspection_result(dynamic raw);
+
+  @protected
   VideoQualityOption dco_decode_video_quality_option(dynamic raw);
 
   @protected
@@ -150,6 +239,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   RustStreamSink<DownloadProgressEvent>
   sse_decode_StreamSink_download_progress_event_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RustStreamSink<PlaylistProgressEvent>
+  sse_decode_StreamSink_playlist_progress_event_Sse(
     SseDeserializer deserializer,
   );
 
@@ -186,7 +281,33 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
+  MediaInspection sse_decode_box_autoadd_media_inspection(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistInspection sse_decode_box_autoadd_playlist_inspection(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistItemStatus sse_decode_box_autoadd_playlist_item_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistSessionSnapshot sse_decode_box_autoadd_playlist_session_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   StartDownloadRequest sse_decode_box_autoadd_start_download_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  StartPlaylistDownloadRequest
+  sse_decode_box_autoadd_start_playlist_download_request(
     SseDeserializer deserializer,
   );
 
@@ -232,12 +353,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
+  InspectionTargetKind sse_decode_inspection_target_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<AudioQualityOption> sse_decode_list_audio_quality_option(
     SseDeserializer deserializer,
   );
 
   @protected
   List<DiscoveredFormat> sse_decode_list_discovered_format(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<PlaylistEntrySummary> sse_decode_list_playlist_entry_summary(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<PlaylistItemState> sse_decode_list_playlist_item_state(
     SseDeserializer deserializer,
   );
 
@@ -267,13 +403,88 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
+  MediaInspection? sse_decode_opt_box_autoadd_media_inspection(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistInspection? sse_decode_opt_box_autoadd_playlist_inspection(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistItemStatus? sse_decode_opt_box_autoadd_playlist_item_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistSessionSnapshot? sse_decode_opt_box_autoadd_playlist_session_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
   BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
 
   @protected
+  PlaylistEntryAvailability sse_decode_playlist_entry_availability(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistEntrySummary sse_decode_playlist_entry_summary(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistEventKind sse_decode_playlist_event_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistInspection sse_decode_playlist_inspection(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistItemState sse_decode_playlist_item_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistItemStatus sse_decode_playlist_item_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistMediaMode sse_decode_playlist_media_mode(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistProgressEvent sse_decode_playlist_progress_event(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistQualityCap sse_decode_playlist_quality_cap(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlaylistSessionSnapshot sse_decode_playlist_session_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   StartDownloadRequest sse_decode_start_download_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  StartPlaylistDownloadRequest sse_decode_start_playlist_download_request(
     SseDeserializer deserializer,
   );
 
@@ -293,6 +504,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
+  UrlInspectionResult sse_decode_url_inspection_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   VideoQualityOption sse_decode_video_quality_option(
     SseDeserializer deserializer,
   );
@@ -306,6 +522,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_StreamSink_download_progress_event_Sse(
     RustStreamSink<DownloadProgressEvent> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_StreamSink_playlist_progress_event_Sse(
+    RustStreamSink<PlaylistProgressEvent> self,
     SseSerializer serializer,
   );
 
@@ -346,8 +568,38 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_media_inspection(
+    MediaInspection self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_playlist_inspection(
+    PlaylistInspection self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_playlist_item_status(
+    PlaylistItemStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_playlist_session_snapshot(
+    PlaylistSessionSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_start_download_request(
     StartDownloadRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_start_playlist_download_request(
+    StartPlaylistDownloadRequest self,
     SseSerializer serializer,
   );
 
@@ -403,6 +655,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_inspection_target_kind(
+    InspectionTargetKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_audio_quality_option(
     List<AudioQualityOption> self,
     SseSerializer serializer,
@@ -411,6 +669,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_discovered_format(
     List<DiscoveredFormat> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_playlist_entry_summary(
+    List<PlaylistEntrySummary> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_playlist_item_state(
+    List<PlaylistItemState> self,
     SseSerializer serializer,
   );
 
@@ -448,14 +718,104 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_media_inspection(
+    MediaInspection? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_playlist_inspection(
+    PlaylistInspection? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_playlist_item_status(
+    PlaylistItemStatus? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_playlist_session_snapshot(
+    PlaylistSessionSnapshot? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_playlist_entry_availability(
+    PlaylistEntryAvailability self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_playlist_entry_summary(
+    PlaylistEntrySummary self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_playlist_event_kind(
+    PlaylistEventKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_playlist_inspection(
+    PlaylistInspection self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_playlist_item_state(
+    PlaylistItemState self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_playlist_item_status(
+    PlaylistItemStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_playlist_media_mode(
+    PlaylistMediaMode self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_playlist_progress_event(
+    PlaylistProgressEvent self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_playlist_quality_cap(
+    PlaylistQualityCap self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_playlist_session_snapshot(
+    PlaylistSessionSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_start_download_request(
     StartDownloadRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_start_playlist_download_request(
+    StartPlaylistDownloadRequest self,
     SseSerializer serializer,
   );
 
@@ -473,6 +833,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_url_inspection_result(
+    UrlInspectionResult self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_video_quality_option(

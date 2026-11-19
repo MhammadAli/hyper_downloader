@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 2011741838;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1815174008;
 
 // Section: executor
 
@@ -75,6 +75,43 @@ fn wire__crate__api__cancel_download_impl(
                 transform_result_sse::<_, String>(
                     (move || async move {
                         let output_ok = crate::api::cancel_download(api_job_id).await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__cancel_playlist_download_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "cancel_playlist_download",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::cancel_playlist_download(api_session_id).await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -182,6 +219,119 @@ fn wire__crate__api__inspect_media_impl(
         },
     )
 }
+fn wire__crate__api__inspect_url_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "inspect_url",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_url = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok = crate::api::inspect_url(api_url).await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__load_saved_playlist_session_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "load_saved_playlist_session",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_playlist_id = <String>::sse_decode(&mut deserializer);
+            let api_output_directory = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok = crate::api::load_saved_playlist_session(
+                            api_playlist_id,
+                            api_output_directory,
+                        )
+                        .await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__pause_playlist_download_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "pause_playlist_download",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok = crate::api::pause_playlist_download(api_session_id).await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__ping_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -247,6 +397,80 @@ fn wire__crate__api__resume_download_impl(
         },
     )
 }
+fn wire__crate__api__resume_playlist_download_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "resume_playlist_download",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::resume_playlist_download(api_session_id).await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__retry_failed_playlist_items_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "retry_failed_playlist_items",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::retry_failed_playlist_items(api_session_id).await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__start_download_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -275,6 +499,43 @@ fn wire__crate__api__start_download_impl(
                 transform_result_sse::<_, String>(
                     (move || async move {
                         let output_ok = crate::api::start_download(api_request).await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__start_playlist_download_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "start_playlist_download",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_request =
+                <crate::models::StartPlaylistDownloadRequest>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok = crate::api::start_playlist_download(api_request).await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -319,6 +580,42 @@ fn wire__crate__api__subscribe_download_progress_impl(
         },
     )
 }
+fn wire__crate__api__subscribe_playlist_progress_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "subscribe_playlist_progress",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_sink = <StreamSink<
+                crate::models::PlaylistProgressEvent,
+                flutter_rust_bridge::for_generated::SseCodec,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::subscribe_playlist_progress(api_sink)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 
 // Section: dart2rust
 
@@ -333,6 +630,19 @@ impl SseDecode for flutter_rust_bridge::for_generated::anyhow::Error {
 impl SseDecode
     for StreamSink<
         crate::models::DownloadProgressEvent,
+        flutter_rust_bridge::for_generated::SseCodec,
+    >
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <String>::sse_decode(deserializer);
+        return StreamSink::deserialize(inner);
+    }
+}
+
+impl SseDecode
+    for StreamSink<
+        crate::models::PlaylistProgressEvent,
         flutter_rust_bridge::for_generated::SseCodec,
     >
 {
@@ -566,6 +876,18 @@ impl SseDecode for i32 {
     }
 }
 
+impl SseDecode for crate::models::InspectionTargetKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::models::InspectionTargetKind::SingleVideo,
+            1 => crate::models::InspectionTargetKind::Playlist,
+            _ => unreachable!("Invalid variant for InspectionTargetKind: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for Vec<crate::models::AudioQualityOption> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -587,6 +909,32 @@ impl SseDecode for Vec<crate::models::DiscoveredFormat> {
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(<crate::models::DiscoveredFormat>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::models::PlaylistEntrySummary> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::models::PlaylistEntrySummary>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::models::PlaylistItemState> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::models::PlaylistItemState>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -697,6 +1045,56 @@ impl SseDecode for Option<f64> {
     }
 }
 
+impl SseDecode for Option<crate::models::MediaInspection> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::models::MediaInspection>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::models::PlaylistInspection> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::models::PlaylistInspection>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::models::PlaylistItemStatus> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::models::PlaylistItemStatus>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::models::PlaylistSessionSnapshot> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::models::PlaylistSessionSnapshot>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<u32> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -719,6 +1117,259 @@ impl SseDecode for Option<u64> {
     }
 }
 
+impl SseDecode for crate::models::PlaylistEntryAvailability {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::models::PlaylistEntryAvailability::Available,
+            1 => crate::models::PlaylistEntryAvailability::Private,
+            2 => crate::models::PlaylistEntryAvailability::Removed,
+            3 => crate::models::PlaylistEntryAvailability::Unavailable,
+            _ => unreachable!("Invalid variant for PlaylistEntryAvailability: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::models::PlaylistEntrySummary {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_orderIndex = <u32>::sse_decode(deserializer);
+        let mut var_videoId = <String>::sse_decode(deserializer);
+        let mut var_title = <String>::sse_decode(deserializer);
+        let mut var_url = <String>::sse_decode(deserializer);
+        let mut var_uploader = <Option<String>>::sse_decode(deserializer);
+        let mut var_durationSeconds = <Option<f64>>::sse_decode(deserializer);
+        let mut var_thumbnailUrl = <Option<String>>::sse_decode(deserializer);
+        let mut var_availability =
+            <crate::models::PlaylistEntryAvailability>::sse_decode(deserializer);
+        let mut var_availabilityReason = <Option<String>>::sse_decode(deserializer);
+        return crate::models::PlaylistEntrySummary {
+            order_index: var_orderIndex,
+            video_id: var_videoId,
+            title: var_title,
+            url: var_url,
+            uploader: var_uploader,
+            duration_seconds: var_durationSeconds,
+            thumbnail_url: var_thumbnailUrl,
+            availability: var_availability,
+            availability_reason: var_availabilityReason,
+        };
+    }
+}
+
+impl SseDecode for crate::models::PlaylistEventKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::models::PlaylistEventKind::PlaylistStarted,
+            1 => crate::models::PlaylistEventKind::PlaylistItemStarted,
+            2 => crate::models::PlaylistEventKind::PlaylistItemProgress,
+            3 => crate::models::PlaylistEventKind::PlaylistItemMerging,
+            4 => crate::models::PlaylistEventKind::PlaylistItemCompleted,
+            5 => crate::models::PlaylistEventKind::PlaylistItemFailed,
+            6 => crate::models::PlaylistEventKind::PlaylistItemSkipped,
+            7 => crate::models::PlaylistEventKind::PlaylistPaused,
+            8 => crate::models::PlaylistEventKind::PlaylistCanceled,
+            9 => crate::models::PlaylistEventKind::PlaylistCompleted,
+            _ => unreachable!("Invalid variant for PlaylistEventKind: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::models::PlaylistInspection {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_title = <String>::sse_decode(deserializer);
+        let mut var_uploader = <Option<String>>::sse_decode(deserializer);
+        let mut var_thumbnailUrl = <Option<String>>::sse_decode(deserializer);
+        let mut var_webpageUrl = <String>::sse_decode(deserializer);
+        let mut var_providerName = <String>::sse_decode(deserializer);
+        let mut var_totalItemCount = <u32>::sse_decode(deserializer);
+        let mut var_entries = <Vec<crate::models::PlaylistEntrySummary>>::sse_decode(deserializer);
+        return crate::models::PlaylistInspection {
+            id: var_id,
+            title: var_title,
+            uploader: var_uploader,
+            thumbnail_url: var_thumbnailUrl,
+            webpage_url: var_webpageUrl,
+            provider_name: var_providerName,
+            total_item_count: var_totalItemCount,
+            entries: var_entries,
+        };
+    }
+}
+
+impl SseDecode for crate::models::PlaylistItemState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_orderIndex = <u32>::sse_decode(deserializer);
+        let mut var_videoId = <String>::sse_decode(deserializer);
+        let mut var_title = <String>::sse_decode(deserializer);
+        let mut var_url = <String>::sse_decode(deserializer);
+        let mut var_durationSeconds = <Option<f64>>::sse_decode(deserializer);
+        let mut var_thumbnailUrl = <Option<String>>::sse_decode(deserializer);
+        let mut var_status = <crate::models::PlaylistItemStatus>::sse_decode(deserializer);
+        let mut var_selectedQuality = <Option<String>>::sse_decode(deserializer);
+        let mut var_audioLanguage =
+            <Option<crate::models::AudioTrackMetadata>>::sse_decode(deserializer);
+        let mut var_downloadedBytes = <u64>::sse_decode(deserializer);
+        let mut var_totalBytes = <Option<u64>>::sse_decode(deserializer);
+        let mut var_isTotalEstimated = <bool>::sse_decode(deserializer);
+        let mut var_outputPath = <Option<String>>::sse_decode(deserializer);
+        let mut var_errorMessage = <Option<String>>::sse_decode(deserializer);
+        return crate::models::PlaylistItemState {
+            order_index: var_orderIndex,
+            video_id: var_videoId,
+            title: var_title,
+            url: var_url,
+            duration_seconds: var_durationSeconds,
+            thumbnail_url: var_thumbnailUrl,
+            status: var_status,
+            selected_quality: var_selectedQuality,
+            audio_language: var_audioLanguage,
+            downloaded_bytes: var_downloadedBytes,
+            total_bytes: var_totalBytes,
+            is_total_estimated: var_isTotalEstimated,
+            output_path: var_outputPath,
+            error_message: var_errorMessage,
+        };
+    }
+}
+
+impl SseDecode for crate::models::PlaylistItemStatus {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::models::PlaylistItemStatus::Pending,
+            1 => crate::models::PlaylistItemStatus::Analyzing,
+            2 => crate::models::PlaylistItemStatus::Ready,
+            3 => crate::models::PlaylistItemStatus::Downloading,
+            4 => crate::models::PlaylistItemStatus::Merging,
+            5 => crate::models::PlaylistItemStatus::Completed,
+            6 => crate::models::PlaylistItemStatus::Failed,
+            7 => crate::models::PlaylistItemStatus::Skipped,
+            8 => crate::models::PlaylistItemStatus::Canceled,
+            _ => unreachable!("Invalid variant for PlaylistItemStatus: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::models::PlaylistMediaMode {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::models::PlaylistMediaMode::VideoWithSound,
+            1 => crate::models::PlaylistMediaMode::AudioOnly,
+            _ => unreachable!("Invalid variant for PlaylistMediaMode: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::models::PlaylistProgressEvent {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_sessionId = <String>::sse_decode(deserializer);
+        let mut var_kind = <crate::models::PlaylistEventKind>::sse_decode(deserializer);
+        let mut var_itemIndex = <Option<u32>>::sse_decode(deserializer);
+        let mut var_itemStatus =
+            <Option<crate::models::PlaylistItemStatus>>::sse_decode(deserializer);
+        let mut var_selectedQuality = <Option<String>>::sse_decode(deserializer);
+        let mut var_audioLanguage =
+            <Option<crate::models::AudioTrackMetadata>>::sse_decode(deserializer);
+        let mut var_itemDownloadedBytes = <u64>::sse_decode(deserializer);
+        let mut var_itemTotalBytes = <Option<u64>>::sse_decode(deserializer);
+        let mut var_itemIsTotalEstimated = <bool>::sse_decode(deserializer);
+        let mut var_speedBytesPerSec = <Option<f64>>::sse_decode(deserializer);
+        let mut var_etaSeconds = <Option<u64>>::sse_decode(deserializer);
+        let mut var_outputPath = <Option<String>>::sse_decode(deserializer);
+        let mut var_completedCount = <u32>::sse_decode(deserializer);
+        let mut var_failedCount = <u32>::sse_decode(deserializer);
+        let mut var_skippedCount = <u32>::sse_decode(deserializer);
+        let mut var_totalCount = <u32>::sse_decode(deserializer);
+        let mut var_playlistOutputDir = <Option<String>>::sse_decode(deserializer);
+        let mut var_message = <Option<String>>::sse_decode(deserializer);
+        return crate::models::PlaylistProgressEvent {
+            session_id: var_sessionId,
+            kind: var_kind,
+            item_index: var_itemIndex,
+            item_status: var_itemStatus,
+            selected_quality: var_selectedQuality,
+            audio_language: var_audioLanguage,
+            item_downloaded_bytes: var_itemDownloadedBytes,
+            item_total_bytes: var_itemTotalBytes,
+            item_is_total_estimated: var_itemIsTotalEstimated,
+            speed_bytes_per_sec: var_speedBytesPerSec,
+            eta_seconds: var_etaSeconds,
+            output_path: var_outputPath,
+            completed_count: var_completedCount,
+            failed_count: var_failedCount,
+            skipped_count: var_skippedCount,
+            total_count: var_totalCount,
+            playlist_output_dir: var_playlistOutputDir,
+            message: var_message,
+        };
+    }
+}
+
+impl SseDecode for crate::models::PlaylistQualityCap {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::models::PlaylistQualityCap::BestAvailable,
+            1 => crate::models::PlaylistQualityCap::UpTo1080p,
+            2 => crate::models::PlaylistQualityCap::UpTo720p,
+            3 => crate::models::PlaylistQualityCap::UpTo480p,
+            _ => unreachable!("Invalid variant for PlaylistQualityCap: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::models::PlaylistSessionSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_sessionId = <String>::sse_decode(deserializer);
+        let mut var_playlistId = <String>::sse_decode(deserializer);
+        let mut var_playlistTitle = <String>::sse_decode(deserializer);
+        let mut var_playlistUrl = <String>::sse_decode(deserializer);
+        let mut var_uploader = <Option<String>>::sse_decode(deserializer);
+        let mut var_thumbnailUrl = <Option<String>>::sse_decode(deserializer);
+        let mut var_outputDirectory = <String>::sse_decode(deserializer);
+        let mut var_mediaMode = <crate::models::PlaylistMediaMode>::sse_decode(deserializer);
+        let mut var_qualityCap = <crate::models::PlaylistQualityCap>::sse_decode(deserializer);
+        let mut var_isRunning = <bool>::sse_decode(deserializer);
+        let mut var_isPaused = <bool>::sse_decode(deserializer);
+        let mut var_completedCount = <u32>::sse_decode(deserializer);
+        let mut var_failedCount = <u32>::sse_decode(deserializer);
+        let mut var_skippedCount = <u32>::sse_decode(deserializer);
+        let mut var_totalCount = <u32>::sse_decode(deserializer);
+        let mut var_items = <Vec<crate::models::PlaylistItemState>>::sse_decode(deserializer);
+        return crate::models::PlaylistSessionSnapshot {
+            session_id: var_sessionId,
+            playlist_id: var_playlistId,
+            playlist_title: var_playlistTitle,
+            playlist_url: var_playlistUrl,
+            uploader: var_uploader,
+            thumbnail_url: var_thumbnailUrl,
+            output_directory: var_outputDirectory,
+            media_mode: var_mediaMode,
+            quality_cap: var_qualityCap,
+            is_running: var_isRunning,
+            is_paused: var_isPaused,
+            completed_count: var_completedCount,
+            failed_count: var_failedCount,
+            skipped_count: var_skippedCount,
+            total_count: var_totalCount,
+            items: var_items,
+        };
+    }
+}
+
 impl SseDecode for crate::models::StartDownloadRequest {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -730,6 +1381,22 @@ impl SseDecode for crate::models::StartDownloadRequest {
             url: var_url,
             title: var_title,
             selection: var_selection,
+            output_directory: var_outputDirectory,
+        };
+    }
+}
+
+impl SseDecode for crate::models::StartPlaylistDownloadRequest {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_playlist = <crate::models::PlaylistInspection>::sse_decode(deserializer);
+        let mut var_mediaMode = <crate::models::PlaylistMediaMode>::sse_decode(deserializer);
+        let mut var_qualityCap = <crate::models::PlaylistQualityCap>::sse_decode(deserializer);
+        let mut var_outputDirectory = <Option<String>>::sse_decode(deserializer);
+        return crate::models::StartPlaylistDownloadRequest {
+            playlist: var_playlist,
+            media_mode: var_mediaMode,
+            quality_cap: var_qualityCap,
             output_directory: var_outputDirectory,
         };
     }
@@ -774,6 +1441,21 @@ impl SseDecode for () {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {}
 }
 
+impl SseDecode for crate::models::UrlInspectionResult {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_kind = <crate::models::InspectionTargetKind>::sse_decode(deserializer);
+        let mut var_video = <Option<crate::models::MediaInspection>>::sse_decode(deserializer);
+        let mut var_playlist =
+            <Option<crate::models::PlaylistInspection>>::sse_decode(deserializer);
+        return crate::models::UrlInspectionResult {
+            kind: var_kind,
+            video: var_video,
+            playlist: var_playlist,
+        };
+    }
+}
+
 impl SseDecode for crate::models::VideoQualityOption {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -816,11 +1498,19 @@ fn pde_ffi_dispatcher_primary_impl(
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
         1 => wire__crate__api__cancel_download_impl(port, ptr, rust_vec_len, data_len),
-        3 => wire__crate__api__init_app_impl(port, ptr, rust_vec_len, data_len),
-        4 => wire__crate__api__inspect_media_impl(port, ptr, rust_vec_len, data_len),
-        6 => wire__crate__api__resume_download_impl(port, ptr, rust_vec_len, data_len),
-        7 => wire__crate__api__start_download_impl(port, ptr, rust_vec_len, data_len),
-        8 => wire__crate__api__subscribe_download_progress_impl(port, ptr, rust_vec_len, data_len),
+        2 => wire__crate__api__cancel_playlist_download_impl(port, ptr, rust_vec_len, data_len),
+        4 => wire__crate__api__init_app_impl(port, ptr, rust_vec_len, data_len),
+        5 => wire__crate__api__inspect_media_impl(port, ptr, rust_vec_len, data_len),
+        6 => wire__crate__api__inspect_url_impl(port, ptr, rust_vec_len, data_len),
+        7 => wire__crate__api__load_saved_playlist_session_impl(port, ptr, rust_vec_len, data_len),
+        8 => wire__crate__api__pause_playlist_download_impl(port, ptr, rust_vec_len, data_len),
+        10 => wire__crate__api__resume_download_impl(port, ptr, rust_vec_len, data_len),
+        11 => wire__crate__api__resume_playlist_download_impl(port, ptr, rust_vec_len, data_len),
+        12 => wire__crate__api__retry_failed_playlist_items_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__start_download_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__start_playlist_download_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__subscribe_download_progress_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__subscribe_playlist_progress_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -833,8 +1523,8 @@ fn pde_ffi_dispatcher_sync_impl(
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        2 => wire__crate__api__engine_version_impl(ptr, rust_vec_len, data_len),
-        5 => wire__crate__api__ping_impl(ptr, rust_vec_len, data_len),
+        3 => wire__crate__api__engine_version_impl(ptr, rust_vec_len, data_len),
+        9 => wire__crate__api__ping_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1089,6 +1779,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::models::FormatSelectionStrategy>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::InspectionTargetKind {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::SingleVideo => 0.into_dart(),
+            Self::Playlist => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::InspectionTargetKind
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::InspectionTargetKind>
+    for crate::models::InspectionTargetKind
+{
+    fn into_into_dart(self) -> crate::models::InspectionTargetKind {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::models::MediaInspection {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -1119,6 +1830,290 @@ impl flutter_rust_bridge::IntoIntoDart<crate::models::MediaInspection>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::PlaylistEntryAvailability {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Available => 0.into_dart(),
+            Self::Private => 1.into_dart(),
+            Self::Removed => 2.into_dart(),
+            Self::Unavailable => 3.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::PlaylistEntryAvailability
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::PlaylistEntryAvailability>
+    for crate::models::PlaylistEntryAvailability
+{
+    fn into_into_dart(self) -> crate::models::PlaylistEntryAvailability {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::PlaylistEntrySummary {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.order_index.into_into_dart().into_dart(),
+            self.video_id.into_into_dart().into_dart(),
+            self.title.into_into_dart().into_dart(),
+            self.url.into_into_dart().into_dart(),
+            self.uploader.into_into_dart().into_dart(),
+            self.duration_seconds.into_into_dart().into_dart(),
+            self.thumbnail_url.into_into_dart().into_dart(),
+            self.availability.into_into_dart().into_dart(),
+            self.availability_reason.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::PlaylistEntrySummary
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::PlaylistEntrySummary>
+    for crate::models::PlaylistEntrySummary
+{
+    fn into_into_dart(self) -> crate::models::PlaylistEntrySummary {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::PlaylistEventKind {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::PlaylistStarted => 0.into_dart(),
+            Self::PlaylistItemStarted => 1.into_dart(),
+            Self::PlaylistItemProgress => 2.into_dart(),
+            Self::PlaylistItemMerging => 3.into_dart(),
+            Self::PlaylistItemCompleted => 4.into_dart(),
+            Self::PlaylistItemFailed => 5.into_dart(),
+            Self::PlaylistItemSkipped => 6.into_dart(),
+            Self::PlaylistPaused => 7.into_dart(),
+            Self::PlaylistCanceled => 8.into_dart(),
+            Self::PlaylistCompleted => 9.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::PlaylistEventKind
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::PlaylistEventKind>
+    for crate::models::PlaylistEventKind
+{
+    fn into_into_dart(self) -> crate::models::PlaylistEventKind {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::PlaylistInspection {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.title.into_into_dart().into_dart(),
+            self.uploader.into_into_dart().into_dart(),
+            self.thumbnail_url.into_into_dart().into_dart(),
+            self.webpage_url.into_into_dart().into_dart(),
+            self.provider_name.into_into_dart().into_dart(),
+            self.total_item_count.into_into_dart().into_dart(),
+            self.entries.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::PlaylistInspection
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::PlaylistInspection>
+    for crate::models::PlaylistInspection
+{
+    fn into_into_dart(self) -> crate::models::PlaylistInspection {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::PlaylistItemState {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.order_index.into_into_dart().into_dart(),
+            self.video_id.into_into_dart().into_dart(),
+            self.title.into_into_dart().into_dart(),
+            self.url.into_into_dart().into_dart(),
+            self.duration_seconds.into_into_dart().into_dart(),
+            self.thumbnail_url.into_into_dart().into_dart(),
+            self.status.into_into_dart().into_dart(),
+            self.selected_quality.into_into_dart().into_dart(),
+            self.audio_language.into_into_dart().into_dart(),
+            self.downloaded_bytes.into_into_dart().into_dart(),
+            self.total_bytes.into_into_dart().into_dart(),
+            self.is_total_estimated.into_into_dart().into_dart(),
+            self.output_path.into_into_dart().into_dart(),
+            self.error_message.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::PlaylistItemState
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::PlaylistItemState>
+    for crate::models::PlaylistItemState
+{
+    fn into_into_dart(self) -> crate::models::PlaylistItemState {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::PlaylistItemStatus {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Pending => 0.into_dart(),
+            Self::Analyzing => 1.into_dart(),
+            Self::Ready => 2.into_dart(),
+            Self::Downloading => 3.into_dart(),
+            Self::Merging => 4.into_dart(),
+            Self::Completed => 5.into_dart(),
+            Self::Failed => 6.into_dart(),
+            Self::Skipped => 7.into_dart(),
+            Self::Canceled => 8.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::PlaylistItemStatus
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::PlaylistItemStatus>
+    for crate::models::PlaylistItemStatus
+{
+    fn into_into_dart(self) -> crate::models::PlaylistItemStatus {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::PlaylistMediaMode {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::VideoWithSound => 0.into_dart(),
+            Self::AudioOnly => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::PlaylistMediaMode
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::PlaylistMediaMode>
+    for crate::models::PlaylistMediaMode
+{
+    fn into_into_dart(self) -> crate::models::PlaylistMediaMode {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::PlaylistProgressEvent {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.session_id.into_into_dart().into_dart(),
+            self.kind.into_into_dart().into_dart(),
+            self.item_index.into_into_dart().into_dart(),
+            self.item_status.into_into_dart().into_dart(),
+            self.selected_quality.into_into_dart().into_dart(),
+            self.audio_language.into_into_dart().into_dart(),
+            self.item_downloaded_bytes.into_into_dart().into_dart(),
+            self.item_total_bytes.into_into_dart().into_dart(),
+            self.item_is_total_estimated.into_into_dart().into_dart(),
+            self.speed_bytes_per_sec.into_into_dart().into_dart(),
+            self.eta_seconds.into_into_dart().into_dart(),
+            self.output_path.into_into_dart().into_dart(),
+            self.completed_count.into_into_dart().into_dart(),
+            self.failed_count.into_into_dart().into_dart(),
+            self.skipped_count.into_into_dart().into_dart(),
+            self.total_count.into_into_dart().into_dart(),
+            self.playlist_output_dir.into_into_dart().into_dart(),
+            self.message.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::PlaylistProgressEvent
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::PlaylistProgressEvent>
+    for crate::models::PlaylistProgressEvent
+{
+    fn into_into_dart(self) -> crate::models::PlaylistProgressEvent {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::PlaylistQualityCap {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::BestAvailable => 0.into_dart(),
+            Self::UpTo1080p => 1.into_dart(),
+            Self::UpTo720p => 2.into_dart(),
+            Self::UpTo480p => 3.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::PlaylistQualityCap
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::PlaylistQualityCap>
+    for crate::models::PlaylistQualityCap
+{
+    fn into_into_dart(self) -> crate::models::PlaylistQualityCap {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::PlaylistSessionSnapshot {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.session_id.into_into_dart().into_dart(),
+            self.playlist_id.into_into_dart().into_dart(),
+            self.playlist_title.into_into_dart().into_dart(),
+            self.playlist_url.into_into_dart().into_dart(),
+            self.uploader.into_into_dart().into_dart(),
+            self.thumbnail_url.into_into_dart().into_dart(),
+            self.output_directory.into_into_dart().into_dart(),
+            self.media_mode.into_into_dart().into_dart(),
+            self.quality_cap.into_into_dart().into_dart(),
+            self.is_running.into_into_dart().into_dart(),
+            self.is_paused.into_into_dart().into_dart(),
+            self.completed_count.into_into_dart().into_dart(),
+            self.failed_count.into_into_dart().into_dart(),
+            self.skipped_count.into_into_dart().into_dart(),
+            self.total_count.into_into_dart().into_dart(),
+            self.items.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::PlaylistSessionSnapshot
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::PlaylistSessionSnapshot>
+    for crate::models::PlaylistSessionSnapshot
+{
+    fn into_into_dart(self) -> crate::models::PlaylistSessionSnapshot {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::models::StartDownloadRequest {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -1142,6 +2137,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::models::StartDownloadRequest>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::StartPlaylistDownloadRequest {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.playlist.into_into_dart().into_dart(),
+            self.media_mode.into_into_dart().into_dart(),
+            self.quality_cap.into_into_dart().into_dart(),
+            self.output_directory.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::StartPlaylistDownloadRequest
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::StartPlaylistDownloadRequest>
+    for crate::models::StartPlaylistDownloadRequest
+{
+    fn into_into_dart(self) -> crate::models::StartPlaylistDownloadRequest {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::models::StreamKind {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -1155,6 +2173,28 @@ impl flutter_rust_bridge::IntoDart for crate::models::StreamKind {
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::models::StreamKind {}
 impl flutter_rust_bridge::IntoIntoDart<crate::models::StreamKind> for crate::models::StreamKind {
     fn into_into_dart(self) -> crate::models::StreamKind {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::UrlInspectionResult {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.kind.into_into_dart().into_dart(),
+            self.video.into_into_dart().into_dart(),
+            self.playlist.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::UrlInspectionResult
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::UrlInspectionResult>
+    for crate::models::UrlInspectionResult
+{
+    fn into_into_dart(self) -> crate::models::UrlInspectionResult {
         self
     }
 }
@@ -1199,6 +2239,18 @@ impl SseEncode for flutter_rust_bridge::for_generated::anyhow::Error {
 impl SseEncode
     for StreamSink<
         crate::models::DownloadProgressEvent,
+        flutter_rust_bridge::for_generated::SseCodec,
+    >
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        unimplemented!("")
+    }
+}
+
+impl SseEncode
+    for StreamSink<
+        crate::models::PlaylistProgressEvent,
         flutter_rust_bridge::for_generated::SseCodec,
     >
 {
@@ -1399,6 +2451,22 @@ impl SseEncode for i32 {
     }
 }
 
+impl SseEncode for crate::models::InspectionTargetKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::models::InspectionTargetKind::SingleVideo => 0,
+                crate::models::InspectionTargetKind::Playlist => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for Vec<crate::models::AudioQualityOption> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -1415,6 +2483,26 @@ impl SseEncode for Vec<crate::models::DiscoveredFormat> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::models::DiscoveredFormat>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::models::PlaylistEntrySummary> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::models::PlaylistEntrySummary>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::models::PlaylistItemState> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::models::PlaylistItemState>::sse_encode(item, serializer);
         }
     }
 }
@@ -1496,6 +2584,46 @@ impl SseEncode for Option<f64> {
     }
 }
 
+impl SseEncode for Option<crate::models::MediaInspection> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::models::MediaInspection>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::models::PlaylistInspection> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::models::PlaylistInspection>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::models::PlaylistItemStatus> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::models::PlaylistItemStatus>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::models::PlaylistSessionSnapshot> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::models::PlaylistSessionSnapshot>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<u32> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -1516,12 +2644,216 @@ impl SseEncode for Option<u64> {
     }
 }
 
+impl SseEncode for crate::models::PlaylistEntryAvailability {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::models::PlaylistEntryAvailability::Available => 0,
+                crate::models::PlaylistEntryAvailability::Private => 1,
+                crate::models::PlaylistEntryAvailability::Removed => 2,
+                crate::models::PlaylistEntryAvailability::Unavailable => 3,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::models::PlaylistEntrySummary {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u32>::sse_encode(self.order_index, serializer);
+        <String>::sse_encode(self.video_id, serializer);
+        <String>::sse_encode(self.title, serializer);
+        <String>::sse_encode(self.url, serializer);
+        <Option<String>>::sse_encode(self.uploader, serializer);
+        <Option<f64>>::sse_encode(self.duration_seconds, serializer);
+        <Option<String>>::sse_encode(self.thumbnail_url, serializer);
+        <crate::models::PlaylistEntryAvailability>::sse_encode(self.availability, serializer);
+        <Option<String>>::sse_encode(self.availability_reason, serializer);
+    }
+}
+
+impl SseEncode for crate::models::PlaylistEventKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::models::PlaylistEventKind::PlaylistStarted => 0,
+                crate::models::PlaylistEventKind::PlaylistItemStarted => 1,
+                crate::models::PlaylistEventKind::PlaylistItemProgress => 2,
+                crate::models::PlaylistEventKind::PlaylistItemMerging => 3,
+                crate::models::PlaylistEventKind::PlaylistItemCompleted => 4,
+                crate::models::PlaylistEventKind::PlaylistItemFailed => 5,
+                crate::models::PlaylistEventKind::PlaylistItemSkipped => 6,
+                crate::models::PlaylistEventKind::PlaylistPaused => 7,
+                crate::models::PlaylistEventKind::PlaylistCanceled => 8,
+                crate::models::PlaylistEventKind::PlaylistCompleted => 9,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::models::PlaylistInspection {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.title, serializer);
+        <Option<String>>::sse_encode(self.uploader, serializer);
+        <Option<String>>::sse_encode(self.thumbnail_url, serializer);
+        <String>::sse_encode(self.webpage_url, serializer);
+        <String>::sse_encode(self.provider_name, serializer);
+        <u32>::sse_encode(self.total_item_count, serializer);
+        <Vec<crate::models::PlaylistEntrySummary>>::sse_encode(self.entries, serializer);
+    }
+}
+
+impl SseEncode for crate::models::PlaylistItemState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u32>::sse_encode(self.order_index, serializer);
+        <String>::sse_encode(self.video_id, serializer);
+        <String>::sse_encode(self.title, serializer);
+        <String>::sse_encode(self.url, serializer);
+        <Option<f64>>::sse_encode(self.duration_seconds, serializer);
+        <Option<String>>::sse_encode(self.thumbnail_url, serializer);
+        <crate::models::PlaylistItemStatus>::sse_encode(self.status, serializer);
+        <Option<String>>::sse_encode(self.selected_quality, serializer);
+        <Option<crate::models::AudioTrackMetadata>>::sse_encode(self.audio_language, serializer);
+        <u64>::sse_encode(self.downloaded_bytes, serializer);
+        <Option<u64>>::sse_encode(self.total_bytes, serializer);
+        <bool>::sse_encode(self.is_total_estimated, serializer);
+        <Option<String>>::sse_encode(self.output_path, serializer);
+        <Option<String>>::sse_encode(self.error_message, serializer);
+    }
+}
+
+impl SseEncode for crate::models::PlaylistItemStatus {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::models::PlaylistItemStatus::Pending => 0,
+                crate::models::PlaylistItemStatus::Analyzing => 1,
+                crate::models::PlaylistItemStatus::Ready => 2,
+                crate::models::PlaylistItemStatus::Downloading => 3,
+                crate::models::PlaylistItemStatus::Merging => 4,
+                crate::models::PlaylistItemStatus::Completed => 5,
+                crate::models::PlaylistItemStatus::Failed => 6,
+                crate::models::PlaylistItemStatus::Skipped => 7,
+                crate::models::PlaylistItemStatus::Canceled => 8,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::models::PlaylistMediaMode {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::models::PlaylistMediaMode::VideoWithSound => 0,
+                crate::models::PlaylistMediaMode::AudioOnly => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::models::PlaylistProgressEvent {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.session_id, serializer);
+        <crate::models::PlaylistEventKind>::sse_encode(self.kind, serializer);
+        <Option<u32>>::sse_encode(self.item_index, serializer);
+        <Option<crate::models::PlaylistItemStatus>>::sse_encode(self.item_status, serializer);
+        <Option<String>>::sse_encode(self.selected_quality, serializer);
+        <Option<crate::models::AudioTrackMetadata>>::sse_encode(self.audio_language, serializer);
+        <u64>::sse_encode(self.item_downloaded_bytes, serializer);
+        <Option<u64>>::sse_encode(self.item_total_bytes, serializer);
+        <bool>::sse_encode(self.item_is_total_estimated, serializer);
+        <Option<f64>>::sse_encode(self.speed_bytes_per_sec, serializer);
+        <Option<u64>>::sse_encode(self.eta_seconds, serializer);
+        <Option<String>>::sse_encode(self.output_path, serializer);
+        <u32>::sse_encode(self.completed_count, serializer);
+        <u32>::sse_encode(self.failed_count, serializer);
+        <u32>::sse_encode(self.skipped_count, serializer);
+        <u32>::sse_encode(self.total_count, serializer);
+        <Option<String>>::sse_encode(self.playlist_output_dir, serializer);
+        <Option<String>>::sse_encode(self.message, serializer);
+    }
+}
+
+impl SseEncode for crate::models::PlaylistQualityCap {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::models::PlaylistQualityCap::BestAvailable => 0,
+                crate::models::PlaylistQualityCap::UpTo1080p => 1,
+                crate::models::PlaylistQualityCap::UpTo720p => 2,
+                crate::models::PlaylistQualityCap::UpTo480p => 3,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::models::PlaylistSessionSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.session_id, serializer);
+        <String>::sse_encode(self.playlist_id, serializer);
+        <String>::sse_encode(self.playlist_title, serializer);
+        <String>::sse_encode(self.playlist_url, serializer);
+        <Option<String>>::sse_encode(self.uploader, serializer);
+        <Option<String>>::sse_encode(self.thumbnail_url, serializer);
+        <String>::sse_encode(self.output_directory, serializer);
+        <crate::models::PlaylistMediaMode>::sse_encode(self.media_mode, serializer);
+        <crate::models::PlaylistQualityCap>::sse_encode(self.quality_cap, serializer);
+        <bool>::sse_encode(self.is_running, serializer);
+        <bool>::sse_encode(self.is_paused, serializer);
+        <u32>::sse_encode(self.completed_count, serializer);
+        <u32>::sse_encode(self.failed_count, serializer);
+        <u32>::sse_encode(self.skipped_count, serializer);
+        <u32>::sse_encode(self.total_count, serializer);
+        <Vec<crate::models::PlaylistItemState>>::sse_encode(self.items, serializer);
+    }
+}
+
 impl SseEncode for crate::models::StartDownloadRequest {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.url, serializer);
         <Option<String>>::sse_encode(self.title, serializer);
         <crate::models::DownloadFormatSelection>::sse_encode(self.selection, serializer);
+        <Option<String>>::sse_encode(self.output_directory, serializer);
+    }
+}
+
+impl SseEncode for crate::models::StartPlaylistDownloadRequest {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::models::PlaylistInspection>::sse_encode(self.playlist, serializer);
+        <crate::models::PlaylistMediaMode>::sse_encode(self.media_mode, serializer);
+        <crate::models::PlaylistQualityCap>::sse_encode(self.quality_cap, serializer);
         <Option<String>>::sse_encode(self.output_directory, serializer);
     }
 }
@@ -1567,6 +2899,15 @@ impl SseEncode for u8 {
 impl SseEncode for () {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {}
+}
+
+impl SseEncode for crate::models::UrlInspectionResult {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::models::InspectionTargetKind>::sse_encode(self.kind, serializer);
+        <Option<crate::models::MediaInspection>>::sse_encode(self.video, serializer);
+        <Option<crate::models::PlaylistInspection>>::sse_encode(self.playlist, serializer);
+    }
 }
 
 impl SseEncode for crate::models::VideoQualityOption {

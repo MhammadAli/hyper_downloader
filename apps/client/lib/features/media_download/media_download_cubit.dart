@@ -5,10 +5,12 @@ import 'package:hyper_download_client/core/bridge/models.dart';
 import 'package:hyper_download_client/features/media_download/media_download_repository.dart';
 import 'package:hyper_download_client/features/media_download/media_download_state.dart';
 
-/// Coordinates URL analysis, simplified quality selection, and single-job downloads.
+/// Coordinates URL analysis, simplified quality selection, single-job & playlist downloads.
 class MediaDownloadCubit extends Cubit<MediaDownloadState> {
   final MediaDownloadRepository _repository;
   StreamSubscription<DownloadProgressEvent>? _progressSubscription;
+  StreamSubscription<PlaylistProgressEvent>? _playlistProgressSubscription;
+  final List<PlaylistProgressEvent> _pendingPlaylistEvents = [];
   bool _pauseRequested = false;
 
   MediaDownloadCubit({required this._repository})
@@ -46,6 +48,18 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
         emit(state.copyWith(downloadError: 'Progress stream error: $error'));
       },
     );
+
+    _playlistProgressSubscription?.cancel();
+    _playlistProgressSubscription = _repository.watchPlaylistProgress().listen(
+      _onPlaylistProgressEvent,
+      onError: (Object error) {
+        emit(
+          state.copyWith(
+            playlistError: 'Playlist progress stream error: $error',
+          ),
+        );
+      },
+    );
   }
 
   void updateUrl(String url) {
@@ -74,26 +88,96 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
         inspectionStatus: InspectionStatus.loading,
         inspectionError: null,
         downloadError: null,
+        playlistError: null,
       ),
     );
 
     try {
-      final result = await _repository.inspectMedia(targetUrl);
-      final defaultVideoId = result.videoOptions.isNotEmpty
-          ? result.videoOptions.first.videoFormatId
+      final inspected = await _repository.inspectUrl(targetUrl);
+      if (inspected.kind == InspectionTargetKind.playlist &&
+          inspected.playlist != null) {
+        final playlist = inspected.playlist!;
+        PlaylistSessionSnapshot? savedSession;
+        try {
+          savedSession = await _repository.loadSavedPlaylistSession(
+            playlistId: playlist.id,
+          );
+        } catch (_) {
+          // Saved manifest loading is best-effort only.
+        }
+        _pendingPlaylistEvents.clear();
+        emit(
+          state.copyWith(
+            inspectionStatus: InspectionStatus.loaded,
+            targetKind: InspectionTargetKind.playlist,
+            inspection: null,
+            inspectionError: null,
+            selectedVideoFormatId: null,
+            selectedAudioOptionFormatId: null,
+            activeJobId: null,
+            isStartingDownload: false,
+            isPaused: false,
+            latestProgress: null,
+            downloadError: null,
+            playlistInspection: playlist,
+            playlistSession: savedSession,
+            playlistMediaMode:
+                savedSession?.mediaMode ?? PlaylistMediaMode.videoWithSound,
+            playlistQualityCap:
+                savedSession?.qualityCap ?? PlaylistQualityCap.bestAvailable,
+            isStartingPlaylist: false,
+            playlistError: null,
+            activePlaylistItemIndex: null,
+            activePlaylistSpeedBytesPerSec: null,
+            activePlaylistEtaSeconds: null,
+            playlistStatusMessage: savedSession != null
+                ? 'Loaded previous session progress.'
+                : null,
+          ),
+        );
+        return;
+      }
+
+      final video = inspected.video;
+      if (video == null) {
+        emit(
+          state.copyWith(
+            inspectionStatus: InspectionStatus.failure,
+            inspectionError: 'No inspectable video or playlist was returned.',
+          ),
+        );
+        return;
+      }
+
+      final defaultVideoId = video.videoOptions.isNotEmpty
+          ? video.videoOptions.first.videoFormatId
           : null;
-      final defaultAudioId = result.audioOptions.isNotEmpty
-          ? result.audioOptions.first.formatId
+      final defaultAudioId = video.audioOptions.isNotEmpty
+          ? video.audioOptions.first.formatId
           : null;
 
       emit(
         state.copyWith(
           inspectionStatus: InspectionStatus.loaded,
-          inspection: result,
+          targetKind: InspectionTargetKind.singleVideo,
+          inspection: video,
           inspectionError: null,
           mediaMode: DownloadMediaMode.videoWithSound,
           selectedVideoFormatId: defaultVideoId,
           selectedAudioOptionFormatId: defaultAudioId,
+          activeJobId: null,
+          isStartingDownload: false,
+          isPaused: false,
+          latestProgress: null,
+          downloadError: null,
+          playlistInspection: null,
+          playlistSession: null,
+          isStartingPlaylist: false,
+          playlistError: null,
+          activePlaylistItemIndex: null,
+          activePlaylistSpeedBytesPerSec: null,
+          activePlaylistEtaSeconds: null,
+          playlistStatusMessage: null,
         ),
       );
     } catch (err) {
@@ -235,6 +319,316 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
     }
   }
 
+  void setPlaylistMediaMode(PlaylistMediaMode mode) {
+    if (state.isPlaylistRunning) return;
+    emit(state.copyWith(playlistMediaMode: mode));
+  }
+
+  void setPlaylistQualityCap(PlaylistQualityCap cap) {
+    if (state.isPlaylistRunning) return;
+    emit(state.copyWith(playlistQualityCap: cap));
+  }
+
+  Future<void> startPlaylistDownload() async {
+    final playlist = state.playlistInspection;
+    if (!state.canStartPlaylist || playlist == null) {
+      return;
+    }
+
+    _pendingPlaylistEvents.clear();
+    emit(
+      state.copyWith(
+        isStartingPlaylist: true,
+        playlistError: null,
+        activePlaylistItemIndex: null,
+        activePlaylistSpeedBytesPerSec: null,
+        activePlaylistEtaSeconds: null,
+        playlistStatusMessage: 'Starting playlist download...',
+      ),
+    );
+
+    try {
+      final snapshot = await _repository.startPlaylistDownload(
+        StartPlaylistDownloadRequest(
+          playlist: playlist,
+          mediaMode: state.playlistMediaMode,
+          qualityCap: state.playlistQualityCap,
+        ),
+      );
+      emit(
+        state.copyWith(
+          isStartingPlaylist: false,
+          playlistSession: snapshot,
+          playlistError: null,
+        ),
+      );
+      _flushPendingPlaylistEvents();
+    } catch (err) {
+      _pendingPlaylistEvents.clear();
+      emit(
+        state.copyWith(
+          isStartingPlaylist: false,
+          playlistError: _cleanErrorMessage(err),
+        ),
+      );
+    }
+  }
+
+  Future<void> pausePlaylistDownload() async {
+    final session = state.playlistSession;
+    if (session == null || !state.canPausePlaylist) return;
+
+    try {
+      await _repository.pausePlaylistDownload(session.sessionId);
+    } catch (err) {
+      emit(state.copyWith(playlistError: _cleanErrorMessage(err)));
+    }
+  }
+
+  Future<void> resumePlaylistDownload() async {
+    final session = state.playlistSession;
+    if (session == null || !state.canResumePlaylist) return;
+
+    emit(
+      state.copyWith(
+        isStartingPlaylist: true,
+        playlistError: null,
+        playlistStatusMessage: 'Resuming playlist download...',
+      ),
+    );
+    try {
+      final resumed = await _repository.resumePlaylistDownload(
+        session.sessionId,
+      );
+      emit(
+        state.copyWith(
+          isStartingPlaylist: false,
+          playlistSession: resumed,
+          playlistError: null,
+        ),
+      );
+      _flushPendingPlaylistEvents();
+    } catch (err) {
+      emit(
+        state.copyWith(
+          isStartingPlaylist: false,
+          playlistError: _cleanErrorMessage(err),
+        ),
+      );
+    }
+  }
+
+  Future<void> cancelPlaylistDownload() async {
+    final session = state.playlistSession;
+    if (session == null || !state.canCancelPlaylist) return;
+
+    try {
+      await _repository.cancelPlaylistDownload(session.sessionId);
+    } catch (err) {
+      emit(state.copyWith(playlistError: _cleanErrorMessage(err)));
+    }
+  }
+
+  Future<void> retryFailedPlaylistItems() async {
+    final session = state.playlistSession;
+    if (session == null || !state.canRetryFailedPlaylist) return;
+
+    emit(
+      state.copyWith(
+        isStartingPlaylist: true,
+        playlistError: null,
+        playlistStatusMessage: 'Retrying failed items...',
+      ),
+    );
+    try {
+      final retried = await _repository.retryFailedPlaylistItems(
+        session.sessionId,
+      );
+      emit(
+        state.copyWith(
+          isStartingPlaylist: false,
+          playlistSession: retried,
+          playlistError: null,
+        ),
+      );
+      _flushPendingPlaylistEvents();
+    } catch (err) {
+      emit(
+        state.copyWith(
+          isStartingPlaylist: false,
+          playlistError: _cleanErrorMessage(err),
+        ),
+      );
+    }
+  }
+
+  void _flushPendingPlaylistEvents() {
+    if (_pendingPlaylistEvents.isEmpty) return;
+    final queued = List<PlaylistProgressEvent>.from(_pendingPlaylistEvents);
+    _pendingPlaylistEvents.clear();
+    for (final event in queued) {
+      _applyPlaylistProgressEvent(event);
+    }
+  }
+
+  void _onPlaylistProgressEvent(PlaylistProgressEvent event) {
+    final currentSession = state.playlistSession;
+    if (currentSession == null) {
+      if (state.isStartingPlaylist) {
+        _pendingPlaylistEvents.add(event);
+      }
+      return;
+    }
+    _applyPlaylistProgressEvent(event);
+  }
+
+  void _applyPlaylistProgressEvent(PlaylistProgressEvent event) {
+    final currentSession = state.playlistSession;
+    if (currentSession == null || currentSession.sessionId != event.sessionId) {
+      return;
+    }
+
+    final updatedItems = currentSession.items
+        .map((item) {
+          if (event.itemIndex == null || item.orderIndex != event.itemIndex) {
+            return item;
+          }
+
+          final nextStatus = switch (event.kind) {
+            PlaylistEventKind.playlistItemStarted =>
+              event.itemStatus ?? PlaylistItemStatus.analyzing,
+            PlaylistEventKind.playlistItemProgress =>
+              event.itemStatus ?? PlaylistItemStatus.downloading,
+            PlaylistEventKind.playlistItemMerging =>
+              event.itemStatus ?? PlaylistItemStatus.merging,
+            PlaylistEventKind.playlistItemCompleted =>
+              PlaylistItemStatus.completed,
+            PlaylistEventKind.playlistItemFailed => PlaylistItemStatus.failed,
+            PlaylistEventKind.playlistItemSkipped => PlaylistItemStatus.skipped,
+            PlaylistEventKind.playlistPaused ||
+            PlaylistEventKind.playlistCanceled =>
+              event.itemStatus ?? PlaylistItemStatus.canceled,
+            PlaylistEventKind.playlistStarted ||
+            PlaylistEventKind.playlistCompleted =>
+              event.itemStatus ?? item.status,
+          };
+
+          final clearError =
+              nextStatus == PlaylistItemStatus.analyzing ||
+              nextStatus == PlaylistItemStatus.downloading ||
+              nextStatus == PlaylistItemStatus.merging ||
+              nextStatus == PlaylistItemStatus.completed;
+
+          final nextDownloaded = event.itemDownloadedBytes > BigInt.zero
+              ? event.itemDownloadedBytes
+              : (nextStatus == PlaylistItemStatus.completed &&
+                    event.itemTotalBytes != null)
+              ? event.itemTotalBytes!
+              : item.downloadedBytes;
+
+          return PlaylistItemState(
+            orderIndex: item.orderIndex,
+            videoId: item.videoId,
+            title: item.title,
+            url: item.url,
+            durationSeconds: item.durationSeconds,
+            thumbnailUrl: item.thumbnailUrl,
+            status: nextStatus,
+            selectedQuality: event.selectedQuality ?? item.selectedQuality,
+            audioLanguage: event.audioLanguage ?? item.audioLanguage,
+            downloadedBytes: nextDownloaded,
+            totalBytes: event.itemTotalBytes ?? item.totalBytes,
+            isTotalEstimated: event.itemIsTotalEstimated,
+            outputPath: event.outputPath ?? item.outputPath,
+            errorMessage: clearError
+                ? null
+                : (event.message ?? item.errorMessage),
+          );
+        })
+        .toList(growable: false);
+
+    final (nextIsRunning, nextIsPaused) = switch (event.kind) {
+      PlaylistEventKind.playlistPaused => (false, true),
+      PlaylistEventKind.playlistCanceled ||
+      PlaylistEventKind.playlistCompleted => (false, false),
+      PlaylistEventKind.playlistStarted ||
+      PlaylistEventKind.playlistItemStarted ||
+      PlaylistEventKind.playlistItemProgress ||
+      PlaylistEventKind.playlistItemMerging ||
+      PlaylistEventKind.playlistItemCompleted ||
+      PlaylistEventKind.playlistItemFailed ||
+      PlaylistEventKind.playlistItemSkipped => (true, false),
+    };
+
+    final updatedSnapshot = PlaylistSessionSnapshot(
+      sessionId: currentSession.sessionId,
+      playlistId: currentSession.playlistId,
+      playlistTitle: currentSession.playlistTitle,
+      playlistUrl: currentSession.playlistUrl,
+      uploader: currentSession.uploader,
+      thumbnailUrl: currentSession.thumbnailUrl,
+      outputDirectory:
+          event.playlistOutputDir ?? currentSession.outputDirectory,
+      mediaMode: currentSession.mediaMode,
+      qualityCap: currentSession.qualityCap,
+      isRunning: nextIsRunning,
+      isPaused: nextIsPaused,
+      completedCount: event.completedCount,
+      failedCount: event.failedCount,
+      skippedCount: event.skippedCount,
+      totalCount: event.totalCount > 0
+          ? event.totalCount
+          : currentSession.totalCount,
+      items: updatedItems,
+    );
+
+    final Object? nextActiveIndex;
+    final Object? nextSpeed;
+    final Object? nextEta;
+
+    switch (event.kind) {
+      case PlaylistEventKind.playlistItemStarted:
+        nextActiveIndex = event.itemIndex;
+        nextSpeed = null;
+        nextEta = null;
+      case PlaylistEventKind.playlistItemProgress:
+        nextActiveIndex = event.itemIndex;
+        nextSpeed = event.speedBytesPerSec;
+        nextEta = event.etaSeconds;
+      case PlaylistEventKind.playlistItemMerging:
+        nextActiveIndex = event.itemIndex;
+        nextSpeed = null;
+        nextEta = null;
+      case PlaylistEventKind.playlistItemCompleted:
+      case PlaylistEventKind.playlistItemFailed:
+      case PlaylistEventKind.playlistItemSkipped:
+        nextActiveIndex = event.itemIndex;
+        nextSpeed = null;
+        nextEta = null;
+      case PlaylistEventKind.playlistPaused:
+      case PlaylistEventKind.playlistCanceled:
+      case PlaylistEventKind.playlistCompleted:
+        nextActiveIndex = null;
+        nextSpeed = null;
+        nextEta = null;
+      case PlaylistEventKind.playlistStarted:
+        nextActiveIndex = state.activePlaylistItemIndex;
+        nextSpeed = state.activePlaylistSpeedBytesPerSec;
+        nextEta = state.activePlaylistEtaSeconds;
+    }
+
+    emit(
+      state.copyWith(
+        playlistSession: updatedSnapshot,
+        isStartingPlaylist: false,
+        activePlaylistItemIndex: nextActiveIndex,
+        activePlaylistSpeedBytesPerSec: nextSpeed,
+        activePlaylistEtaSeconds: nextEta,
+        playlistStatusMessage: event.message ?? state.playlistStatusMessage,
+      ),
+    );
+  }
+
   void _onProgressEvent(DownloadProgressEvent event) {
     final activeId = state.activeJobId;
     if (activeId != null && event.jobId != activeId) {
@@ -287,6 +681,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
   @override
   Future<void> close() async {
     await _progressSubscription?.cancel();
+    await _playlistProgressSubscription?.cancel();
     return super.close();
   }
 }

@@ -9,12 +9,13 @@ enum InspectionStatus { initial, loading, loaded, failure }
 
 const Object _unset = Object();
 
-/// Immutable UI and engine state for IDM-style media inspection & downloading.
+/// Immutable UI and engine state for IDM-style media & playlist inspection and downloading.
 class MediaDownloadState extends Equatable {
   final bool isEngineReady;
   final String? engineError;
   final String urlInput;
   final InspectionStatus inspectionStatus;
+  final InspectionTargetKind? targetKind;
   final MediaInspection? inspection;
   final String? inspectionError;
   final DownloadMediaMode mediaMode;
@@ -26,11 +27,24 @@ class MediaDownloadState extends Equatable {
   final DownloadProgressEvent? latestProgress;
   final String? downloadError;
 
+  // Playlist state fields.
+  final PlaylistInspection? playlistInspection;
+  final PlaylistSessionSnapshot? playlistSession;
+  final PlaylistMediaMode playlistMediaMode;
+  final PlaylistQualityCap playlistQualityCap;
+  final bool isStartingPlaylist;
+  final String? playlistError;
+  final int? activePlaylistItemIndex;
+  final double? activePlaylistSpeedBytesPerSec;
+  final BigInt? activePlaylistEtaSeconds;
+  final String? playlistStatusMessage;
+
   const MediaDownloadState({
     this.isEngineReady = false,
     this.engineError,
     this.urlInput = '',
     this.inspectionStatus = InspectionStatus.initial,
+    this.targetKind,
     this.inspection,
     this.inspectionError,
     this.mediaMode = DownloadMediaMode.videoWithSound,
@@ -41,7 +55,75 @@ class MediaDownloadState extends Equatable {
     this.isPaused = false,
     this.latestProgress,
     this.downloadError,
+    this.playlistInspection,
+    this.playlistSession,
+    this.playlistMediaMode = PlaylistMediaMode.videoWithSound,
+    this.playlistQualityCap = PlaylistQualityCap.bestAvailable,
+    this.isStartingPlaylist = false,
+    this.playlistError,
+    this.activePlaylistItemIndex,
+    this.activePlaylistSpeedBytesPerSec,
+    this.activePlaylistEtaSeconds,
+    this.playlistStatusMessage,
   });
+
+  bool get isSingleVideoTarget =>
+      targetKind == InspectionTargetKind.singleVideo ||
+      (targetKind == null && inspection != null);
+
+  bool get isPlaylistTarget =>
+      targetKind == InspectionTargetKind.playlist && playlistInspection != null;
+
+  bool get isPlaylistRunning =>
+      isStartingPlaylist || (playlistSession?.isRunning ?? false);
+
+  bool get isPlaylistPaused => playlistSession?.isPaused ?? false;
+
+  bool get canStartPlaylist => isPlaylistTarget && !isPlaylistRunning;
+
+  bool get canPausePlaylist =>
+      playlistSession != null &&
+      playlistSession!.isRunning &&
+      !playlistSession!.isPaused;
+
+  bool get canResumePlaylist =>
+      playlistSession != null &&
+      !isStartingPlaylist &&
+      (playlistSession!.isPaused ||
+          (!playlistSession!.isRunning &&
+              playlistSession!.items.any(
+                (i) =>
+                    i.status == PlaylistItemStatus.pending ||
+                    i.status == PlaylistItemStatus.canceled,
+              )));
+
+  bool get canCancelPlaylist =>
+      playlistSession != null &&
+      (playlistSession!.isRunning || playlistSession!.isPaused);
+
+  bool get canRetryFailedPlaylist =>
+      playlistSession != null &&
+      !isPlaylistRunning &&
+      playlistSession!.failedCount > 0;
+
+  PlaylistItemState? get activePlaylistItem {
+    final session = playlistSession;
+    if (session == null) return null;
+    final idx = activePlaylistItemIndex;
+    if (idx != null) {
+      for (final item in session.items) {
+        if (item.orderIndex == idx) return item;
+      }
+    }
+    for (final item in session.items) {
+      if (item.status == PlaylistItemStatus.analyzing ||
+          item.status == PlaylistItemStatus.downloading ||
+          item.status == PlaylistItemStatus.merging) {
+        return item;
+      }
+    }
+    return null;
+  }
 
   List<VideoQualityOption> get videoOptions =>
       inspection?.videoOptions ?? const [];
@@ -117,6 +199,7 @@ class MediaDownloadState extends Equatable {
     Object? engineError = _unset,
     String? urlInput,
     InspectionStatus? inspectionStatus,
+    Object? targetKind = _unset,
     Object? inspection = _unset,
     Object? inspectionError = _unset,
     DownloadMediaMode? mediaMode,
@@ -127,6 +210,16 @@ class MediaDownloadState extends Equatable {
     bool? isPaused,
     Object? latestProgress = _unset,
     Object? downloadError = _unset,
+    Object? playlistInspection = _unset,
+    Object? playlistSession = _unset,
+    PlaylistMediaMode? playlistMediaMode,
+    PlaylistQualityCap? playlistQualityCap,
+    bool? isStartingPlaylist,
+    Object? playlistError = _unset,
+    Object? activePlaylistItemIndex = _unset,
+    Object? activePlaylistSpeedBytesPerSec = _unset,
+    Object? activePlaylistEtaSeconds = _unset,
+    Object? playlistStatusMessage = _unset,
   }) {
     return MediaDownloadState(
       isEngineReady: isEngineReady ?? this.isEngineReady,
@@ -135,6 +228,9 @@ class MediaDownloadState extends Equatable {
           : engineError as String?,
       urlInput: urlInput ?? this.urlInput,
       inspectionStatus: inspectionStatus ?? this.inspectionStatus,
+      targetKind: identical(targetKind, _unset)
+          ? this.targetKind
+          : targetKind as InspectionTargetKind?,
       inspection: identical(inspection, _unset)
           ? this.inspection
           : inspection as MediaInspection?,
@@ -160,6 +256,31 @@ class MediaDownloadState extends Equatable {
       downloadError: identical(downloadError, _unset)
           ? this.downloadError
           : downloadError as String?,
+      playlistInspection: identical(playlistInspection, _unset)
+          ? this.playlistInspection
+          : playlistInspection as PlaylistInspection?,
+      playlistSession: identical(playlistSession, _unset)
+          ? this.playlistSession
+          : playlistSession as PlaylistSessionSnapshot?,
+      playlistMediaMode: playlistMediaMode ?? this.playlistMediaMode,
+      playlistQualityCap: playlistQualityCap ?? this.playlistQualityCap,
+      isStartingPlaylist: isStartingPlaylist ?? this.isStartingPlaylist,
+      playlistError: identical(playlistError, _unset)
+          ? this.playlistError
+          : playlistError as String?,
+      activePlaylistItemIndex: identical(activePlaylistItemIndex, _unset)
+          ? this.activePlaylistItemIndex
+          : activePlaylistItemIndex as int?,
+      activePlaylistSpeedBytesPerSec:
+          identical(activePlaylistSpeedBytesPerSec, _unset)
+          ? this.activePlaylistSpeedBytesPerSec
+          : activePlaylistSpeedBytesPerSec as double?,
+      activePlaylistEtaSeconds: identical(activePlaylistEtaSeconds, _unset)
+          ? this.activePlaylistEtaSeconds
+          : activePlaylistEtaSeconds as BigInt?,
+      playlistStatusMessage: identical(playlistStatusMessage, _unset)
+          ? this.playlistStatusMessage
+          : playlistStatusMessage as String?,
     );
   }
 
@@ -169,6 +290,7 @@ class MediaDownloadState extends Equatable {
     engineError,
     urlInput,
     inspectionStatus,
+    targetKind,
     inspection?.id,
     inspection?.title,
     inspection?.uploader,
@@ -189,5 +311,37 @@ class MediaDownloadState extends Equatable {
     isPaused,
     latestProgress,
     downloadError,
+    playlistInspection?.id,
+    playlistInspection?.title,
+    playlistInspection?.uploader,
+    playlistInspection?.thumbnailUrl,
+    playlistInspection?.webpageUrl,
+    playlistInspection?.providerName,
+    playlistInspection?.totalItemCount,
+    playlistInspection?.entries,
+    playlistSession?.sessionId,
+    playlistSession?.playlistId,
+    playlistSession?.playlistTitle,
+    playlistSession?.playlistUrl,
+    playlistSession?.uploader,
+    playlistSession?.thumbnailUrl,
+    playlistSession?.outputDirectory,
+    playlistSession?.mediaMode,
+    playlistSession?.qualityCap,
+    playlistSession?.isRunning,
+    playlistSession?.isPaused,
+    playlistSession?.completedCount,
+    playlistSession?.failedCount,
+    playlistSession?.skippedCount,
+    playlistSession?.totalCount,
+    playlistSession?.items,
+    playlistMediaMode,
+    playlistQualityCap,
+    isStartingPlaylist,
+    playlistError,
+    activePlaylistItemIndex,
+    activePlaylistSpeedBytesPerSec,
+    activePlaylistEtaSeconds,
+    playlistStatusMessage,
   ];
 }

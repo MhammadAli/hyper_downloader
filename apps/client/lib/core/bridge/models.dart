@@ -285,6 +285,9 @@ enum FormatSelectionStrategy {
   audioOnlyStream,
 }
 
+/// Identifies whether an analyzed URL points to a single video or a playlist.
+enum InspectionTargetKind { singleVideo, playlist }
+
 /// Metadata and genuinely available options/formats extracted for a media URL.
 class MediaInspection {
   final String id;
@@ -345,6 +348,382 @@ class MediaInspection {
           formats == other.formats;
 }
 
+/// Availability state reported for a playlist entry during flat enumeration.
+enum PlaylistEntryAvailability { available, private, removed, unavailable }
+
+/// Metadata summary for one entry inside an enumerated playlist.
+class PlaylistEntrySummary {
+  final int orderIndex;
+  final String videoId;
+  final String title;
+  final String url;
+  final String? uploader;
+  final double? durationSeconds;
+  final String? thumbnailUrl;
+  final PlaylistEntryAvailability availability;
+  final String? availabilityReason;
+
+  const PlaylistEntrySummary({
+    required this.orderIndex,
+    required this.videoId,
+    required this.title,
+    required this.url,
+    this.uploader,
+    this.durationSeconds,
+    this.thumbnailUrl,
+    required this.availability,
+    this.availabilityReason,
+  });
+
+  @override
+  int get hashCode =>
+      orderIndex.hashCode ^
+      videoId.hashCode ^
+      title.hashCode ^
+      url.hashCode ^
+      uploader.hashCode ^
+      durationSeconds.hashCode ^
+      thumbnailUrl.hashCode ^
+      availability.hashCode ^
+      availabilityReason.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlaylistEntrySummary &&
+          runtimeType == other.runtimeType &&
+          orderIndex == other.orderIndex &&
+          videoId == other.videoId &&
+          title == other.title &&
+          url == other.url &&
+          uploader == other.uploader &&
+          durationSeconds == other.durationSeconds &&
+          thumbnailUrl == other.thumbnailUrl &&
+          availability == other.availability &&
+          availabilityReason == other.availabilityReason;
+}
+
+/// Event discriminator for structured playlist batch progress reporting.
+enum PlaylistEventKind {
+  playlistStarted,
+  playlistItemStarted,
+  playlistItemProgress,
+  playlistItemMerging,
+  playlistItemCompleted,
+  playlistItemFailed,
+  playlistItemSkipped,
+  playlistPaused,
+  playlistCanceled,
+  playlistCompleted,
+}
+
+/// Complete playlist inspection metadata and ordered entry list.
+class PlaylistInspection {
+  final String id;
+  final String title;
+  final String? uploader;
+  final String? thumbnailUrl;
+  final String webpageUrl;
+  final String providerName;
+  final int totalItemCount;
+  final List<PlaylistEntrySummary> entries;
+
+  const PlaylistInspection({
+    required this.id,
+    required this.title,
+    this.uploader,
+    this.thumbnailUrl,
+    required this.webpageUrl,
+    required this.providerName,
+    required this.totalItemCount,
+    required this.entries,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      title.hashCode ^
+      uploader.hashCode ^
+      thumbnailUrl.hashCode ^
+      webpageUrl.hashCode ^
+      providerName.hashCode ^
+      totalItemCount.hashCode ^
+      entries.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlaylistInspection &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          title == other.title &&
+          uploader == other.uploader &&
+          thumbnailUrl == other.thumbnailUrl &&
+          webpageUrl == other.webpageUrl &&
+          providerName == other.providerName &&
+          totalItemCount == other.totalItemCount &&
+          entries == other.entries;
+}
+
+/// Per-item runtime and persisted status inside a playlist session.
+class PlaylistItemState {
+  final int orderIndex;
+  final String videoId;
+  final String title;
+  final String url;
+  final double? durationSeconds;
+  final String? thumbnailUrl;
+  final PlaylistItemStatus status;
+  final String? selectedQuality;
+  final AudioTrackMetadata? audioLanguage;
+  final BigInt downloadedBytes;
+  final BigInt? totalBytes;
+  final bool isTotalEstimated;
+  final String? outputPath;
+  final String? errorMessage;
+
+  const PlaylistItemState({
+    required this.orderIndex,
+    required this.videoId,
+    required this.title,
+    required this.url,
+    this.durationSeconds,
+    this.thumbnailUrl,
+    required this.status,
+    this.selectedQuality,
+    this.audioLanguage,
+    required this.downloadedBytes,
+    this.totalBytes,
+    required this.isTotalEstimated,
+    this.outputPath,
+    this.errorMessage,
+  });
+
+  @override
+  int get hashCode =>
+      orderIndex.hashCode ^
+      videoId.hashCode ^
+      title.hashCode ^
+      url.hashCode ^
+      durationSeconds.hashCode ^
+      thumbnailUrl.hashCode ^
+      status.hashCode ^
+      selectedQuality.hashCode ^
+      audioLanguage.hashCode ^
+      downloadedBytes.hashCode ^
+      totalBytes.hashCode ^
+      isTotalEstimated.hashCode ^
+      outputPath.hashCode ^
+      errorMessage.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlaylistItemState &&
+          runtimeType == other.runtimeType &&
+          orderIndex == other.orderIndex &&
+          videoId == other.videoId &&
+          title == other.title &&
+          url == other.url &&
+          durationSeconds == other.durationSeconds &&
+          thumbnailUrl == other.thumbnailUrl &&
+          status == other.status &&
+          selectedQuality == other.selectedQuality &&
+          audioLanguage == other.audioLanguage &&
+          downloadedBytes == other.downloadedBytes &&
+          totalBytes == other.totalBytes &&
+          isTotalEstimated == other.isTotalEstimated &&
+          outputPath == other.outputPath &&
+          errorMessage == other.errorMessage;
+}
+
+/// Lifecycle state tracked for each individual playlist item.
+enum PlaylistItemStatus {
+  pending,
+  analyzing,
+  ready,
+  downloading,
+  merging,
+  completed,
+  failed,
+  skipped,
+  canceled,
+}
+
+/// Output mode selected for a playlist download batch.
+enum PlaylistMediaMode { videoWithSound, audioOnly }
+
+/// Incremental playlist batch and active-item progress streamed to Flutter.
+class PlaylistProgressEvent {
+  final String sessionId;
+  final PlaylistEventKind kind;
+  final int? itemIndex;
+  final PlaylistItemStatus? itemStatus;
+  final String? selectedQuality;
+  final AudioTrackMetadata? audioLanguage;
+  final BigInt itemDownloadedBytes;
+  final BigInt? itemTotalBytes;
+  final bool itemIsTotalEstimated;
+  final double? speedBytesPerSec;
+  final BigInt? etaSeconds;
+  final String? outputPath;
+  final int completedCount;
+  final int failedCount;
+  final int skippedCount;
+  final int totalCount;
+  final String? playlistOutputDir;
+  final String? message;
+
+  const PlaylistProgressEvent({
+    required this.sessionId,
+    required this.kind,
+    this.itemIndex,
+    this.itemStatus,
+    this.selectedQuality,
+    this.audioLanguage,
+    required this.itemDownloadedBytes,
+    this.itemTotalBytes,
+    required this.itemIsTotalEstimated,
+    this.speedBytesPerSec,
+    this.etaSeconds,
+    this.outputPath,
+    required this.completedCount,
+    required this.failedCount,
+    required this.skippedCount,
+    required this.totalCount,
+    this.playlistOutputDir,
+    this.message,
+  });
+
+  @override
+  int get hashCode =>
+      sessionId.hashCode ^
+      kind.hashCode ^
+      itemIndex.hashCode ^
+      itemStatus.hashCode ^
+      selectedQuality.hashCode ^
+      audioLanguage.hashCode ^
+      itemDownloadedBytes.hashCode ^
+      itemTotalBytes.hashCode ^
+      itemIsTotalEstimated.hashCode ^
+      speedBytesPerSec.hashCode ^
+      etaSeconds.hashCode ^
+      outputPath.hashCode ^
+      completedCount.hashCode ^
+      failedCount.hashCode ^
+      skippedCount.hashCode ^
+      totalCount.hashCode ^
+      playlistOutputDir.hashCode ^
+      message.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlaylistProgressEvent &&
+          runtimeType == other.runtimeType &&
+          sessionId == other.sessionId &&
+          kind == other.kind &&
+          itemIndex == other.itemIndex &&
+          itemStatus == other.itemStatus &&
+          selectedQuality == other.selectedQuality &&
+          audioLanguage == other.audioLanguage &&
+          itemDownloadedBytes == other.itemDownloadedBytes &&
+          itemTotalBytes == other.itemTotalBytes &&
+          itemIsTotalEstimated == other.itemIsTotalEstimated &&
+          speedBytesPerSec == other.speedBytesPerSec &&
+          etaSeconds == other.etaSeconds &&
+          outputPath == other.outputPath &&
+          completedCount == other.completedCount &&
+          failedCount == other.failedCount &&
+          skippedCount == other.skippedCount &&
+          totalCount == other.totalCount &&
+          playlistOutputDir == other.playlistOutputDir &&
+          message == other.message;
+}
+
+/// Upper quality cap applied per playlist item without fabricating unavailable streams.
+enum PlaylistQualityCap { bestAvailable, upTo1080P, upTo720P, upTo480P }
+
+/// Lightweight persistent manifest & UI snapshot for a playlist download session.
+class PlaylistSessionSnapshot {
+  final String sessionId;
+  final String playlistId;
+  final String playlistTitle;
+  final String playlistUrl;
+  final String? uploader;
+  final String? thumbnailUrl;
+  final String outputDirectory;
+  final PlaylistMediaMode mediaMode;
+  final PlaylistQualityCap qualityCap;
+  final bool isRunning;
+  final bool isPaused;
+  final int completedCount;
+  final int failedCount;
+  final int skippedCount;
+  final int totalCount;
+  final List<PlaylistItemState> items;
+
+  const PlaylistSessionSnapshot({
+    required this.sessionId,
+    required this.playlistId,
+    required this.playlistTitle,
+    required this.playlistUrl,
+    this.uploader,
+    this.thumbnailUrl,
+    required this.outputDirectory,
+    required this.mediaMode,
+    required this.qualityCap,
+    required this.isRunning,
+    required this.isPaused,
+    required this.completedCount,
+    required this.failedCount,
+    required this.skippedCount,
+    required this.totalCount,
+    required this.items,
+  });
+
+  @override
+  int get hashCode =>
+      sessionId.hashCode ^
+      playlistId.hashCode ^
+      playlistTitle.hashCode ^
+      playlistUrl.hashCode ^
+      uploader.hashCode ^
+      thumbnailUrl.hashCode ^
+      outputDirectory.hashCode ^
+      mediaMode.hashCode ^
+      qualityCap.hashCode ^
+      isRunning.hashCode ^
+      isPaused.hashCode ^
+      completedCount.hashCode ^
+      failedCount.hashCode ^
+      skippedCount.hashCode ^
+      totalCount.hashCode ^
+      items.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlaylistSessionSnapshot &&
+          runtimeType == other.runtimeType &&
+          sessionId == other.sessionId &&
+          playlistId == other.playlistId &&
+          playlistTitle == other.playlistTitle &&
+          playlistUrl == other.playlistUrl &&
+          uploader == other.uploader &&
+          thumbnailUrl == other.thumbnailUrl &&
+          outputDirectory == other.outputDirectory &&
+          mediaMode == other.mediaMode &&
+          qualityCap == other.qualityCap &&
+          isRunning == other.isRunning &&
+          isPaused == other.isPaused &&
+          completedCount == other.completedCount &&
+          failedCount == other.failedCount &&
+          skippedCount == other.skippedCount &&
+          totalCount == other.totalCount &&
+          items == other.items;
+}
+
 /// Request payload to start a single download job.
 class StartDownloadRequest {
   final String url;
@@ -377,8 +756,61 @@ class StartDownloadRequest {
           outputDirectory == other.outputDirectory;
 }
 
+/// Request payload to start downloading a previously inspected playlist.
+class StartPlaylistDownloadRequest {
+  final PlaylistInspection playlist;
+  final PlaylistMediaMode mediaMode;
+  final PlaylistQualityCap qualityCap;
+  final String? outputDirectory;
+
+  const StartPlaylistDownloadRequest({
+    required this.playlist,
+    required this.mediaMode,
+    required this.qualityCap,
+    this.outputDirectory,
+  });
+
+  @override
+  int get hashCode =>
+      playlist.hashCode ^
+      mediaMode.hashCode ^
+      qualityCap.hashCode ^
+      outputDirectory.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is StartPlaylistDownloadRequest &&
+          runtimeType == other.runtimeType &&
+          playlist == other.playlist &&
+          mediaMode == other.mediaMode &&
+          qualityCap == other.qualityCap &&
+          outputDirectory == other.outputDirectory;
+}
+
 /// Kind of media streams contained in a discovered format.
 enum StreamKind { muxedAudioVideo, videoOnly, audioOnly }
+
+/// Unified result returned when analyzing any single-video or playlist URL.
+class UrlInspectionResult {
+  final InspectionTargetKind kind;
+  final MediaInspection? video;
+  final PlaylistInspection? playlist;
+
+  const UrlInspectionResult({required this.kind, this.video, this.playlist});
+
+  @override
+  int get hashCode => kind.hashCode ^ video.hashCode ^ playlist.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is UrlInspectionResult &&
+          runtimeType == other.runtimeType &&
+          kind == other.kind &&
+          video == other.video &&
+          playlist == other.playlist;
+}
 
 /// High-level user-facing video quality option representing a complete video with sound.
 class VideoQualityOption {

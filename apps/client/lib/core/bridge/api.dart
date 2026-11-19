@@ -13,6 +13,10 @@ String ping() => RustLib.instance.api.crateApiPing();
 /// Returns the Rust engine crate version.
 String engineVersion() => RustLib.instance.api.crateApiEngineVersion();
 
+/// Inspects any URL and detects whether it is a single video or a full playlist.
+Future<UrlInspectionResult> inspectUrl({required String url}) =>
+    RustLib.instance.api.crateApiInspectUrl(url: url);
+
 /// Inspects a media URL using the local `yt-dlp` binary and returns metadata and formats.
 Future<MediaInspection> inspectMedia({required String url}) =>
     RustLib.instance.api.crateApiInspectMedia(url: url);
@@ -32,3 +36,40 @@ Future<String> resumeDownload({required String jobId}) =>
 /// Subscribes a Flutter stream sink to incremental Rust download progress events.
 Stream<DownloadProgressEvent> subscribeDownloadProgress() =>
     RustLib.instance.api.crateApiSubscribeDownloadProgress();
+
+/// Starts sequential batch downloading for an enumerated playlist.
+Future<PlaylistSessionSnapshot> startPlaylistDownload({
+  required StartPlaylistDownloadRequest request,
+}) => RustLib.instance.api.crateApiStartPlaylistDownload(request: request);
+
+/// Pauses an active playlist download session while retaining completed files and partial progress.
+Future<void> pausePlaylistDownload({required String sessionId}) =>
+    RustLib.instance.api.crateApiPausePlaylistDownload(sessionId: sessionId);
+
+/// Resumes a paused, canceled, or recovered playlist download session.
+Future<PlaylistSessionSnapshot> resumePlaylistDownload({
+  required String sessionId,
+}) => RustLib.instance.api.crateApiResumePlaylistDownload(sessionId: sessionId);
+
+/// Cancels remaining playlist items cleanly while preserving completed downloads.
+Future<void> cancelPlaylistDownload({required String sessionId}) =>
+    RustLib.instance.api.crateApiCancelPlaylistDownload(sessionId: sessionId);
+
+/// Retries all failed items inside a playlist download session without re-downloading completed items.
+Future<PlaylistSessionSnapshot> retryFailedPlaylistItems({
+  required String sessionId,
+}) =>
+    RustLib.instance.api.crateApiRetryFailedPlaylistItems(sessionId: sessionId);
+
+/// Loads any saved persistent playlist manifest from disk so interrupted batches can resume.
+Future<PlaylistSessionSnapshot?> loadSavedPlaylistSession({
+  required String playlistId,
+  String? outputDirectory,
+}) => RustLib.instance.api.crateApiLoadSavedPlaylistSession(
+  playlistId: playlistId,
+  outputDirectory: outputDirectory,
+);
+
+/// Subscribes a Flutter stream sink to incremental playlist batch progress events.
+Stream<PlaylistProgressEvent> subscribePlaylistProgress() =>
+    RustLib.instance.api.crateApiSubscribePlaylistProgress();

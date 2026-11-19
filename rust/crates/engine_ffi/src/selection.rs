@@ -3,7 +3,8 @@
 
 use crate::models::{
     AudioQualityOption, AudioSelectionConfidence, AudioTrackMetadata, DiscoveredFormat,
-    FileSizeAccuracy, FormatSelectionStrategy, StreamKind, VideoQualityOption,
+    DownloadFormatSelection, FileSizeAccuracy, FormatSelectionStrategy, MediaInspection,
+    PlaylistMediaMode, PlaylistQualityCap, StreamKind, VideoQualityOption,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -947,5 +948,108 @@ fn format_bytes_human(bytes: u64) -> String {
         format!("{:.2} MB", val / MB)
     } else {
         format!("{:.2} GB", val / GB)
+    }
+}
+
+/// Concrete format selection resolved for one playlist item after applying the requested cap.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedPlaylistSelection {
+    pub selection: DownloadFormatSelection,
+    pub quality_label: String,
+    pub container: String,
+    pub audio_language: Option<AudioTrackMetadata>,
+}
+
+/// Selects the best playable option for an individually inspected playlist video
+/// using its genuinely discovered formats, original-audio metadata, and quality cap.
+pub fn select_playlist_item_option(
+    inspection: &MediaInspection,
+    mode: PlaylistMediaMode,
+    cap: PlaylistQualityCap,
+) -> Result<ResolvedPlaylistSelection, String> {
+    match mode {
+        PlaylistMediaMode::VideoWithSound => {
+            if inspection.video_options.is_empty() {
+                return Err(
+                    "No playable Video with Sound formats (valid audio track unavailable) for this item."
+                        .into(),
+                );
+            }
+            let max_height = match cap {
+                PlaylistQualityCap::BestAvailable => u32::MAX,
+                PlaylistQualityCap::UpTo1080p => 1080,
+                PlaylistQualityCap::UpTo720p => 720,
+                PlaylistQualityCap::UpTo480p => 480,
+            };
+
+            let chosen = inspection
+                .video_options
+                .iter()
+                .find(|opt| opt.height.is_some_and(|h| h <= max_height))
+                .or_else(|| inspection.video_options.last())
+                .ok_or_else(|| "No playable video options available.".to_string())?;
+
+            let selection = match chosen.format_selection_strategy {
+                FormatSelectionStrategy::CombinedAudioVideo => {
+                    DownloadFormatSelection::single(&chosen.video_format_id)
+                }
+                FormatSelectionStrategy::PairVideoAndAudioWithFfmpeg => {
+                    let audio_id = chosen.selected_audio_format_id.as_deref().ok_or_else(|| {
+                        "Internal format pairing error: missing original audio format ID."
+                            .to_string()
+                    })?;
+                    DownloadFormatSelection::video_and_audio(
+                        &chosen.video_format_id,
+                        audio_id,
+                        &chosen.container,
+                    )
+                }
+                FormatSelectionStrategy::AudioOnlyStream => {
+                    return Err("Unexpected AudioOnly strategy inside video options.".into());
+                }
+            };
+
+            let fps_part = chosen
+                .fps
+                .filter(|f| *f >= 45.0)
+                .map(|f| format!(" {}fps", f.round() as u32))
+                .unwrap_or_default();
+            let quality_label = format!(
+                "{}{} {}",
+                chosen.resolution,
+                fps_part,
+                chosen.container.to_ascii_uppercase()
+            );
+
+            Ok(ResolvedPlaylistSelection {
+                selection,
+                quality_label,
+                container: chosen.container.clone(),
+                audio_language: chosen
+                    .audio_language
+                    .clone()
+                    .or_else(|| inspection.original_audio.clone()),
+            })
+        }
+        PlaylistMediaMode::AudioOnly => {
+            let chosen = inspection.audio_options.first().ok_or_else(|| {
+                "No downloadable Audio Only stream discovered for this item.".to_string()
+            })?;
+            let quality_label = format!(
+                "{} · {}",
+                chosen.container.to_ascii_uppercase(),
+                chosen.quality_label
+            );
+
+            Ok(ResolvedPlaylistSelection {
+                selection: DownloadFormatSelection::single(&chosen.format_id),
+                quality_label,
+                container: chosen.container.clone(),
+                audio_language: chosen
+                    .audio_language
+                    .clone()
+                    .or_else(|| inspection.original_audio.clone()),
+            })
+        }
     }
 }

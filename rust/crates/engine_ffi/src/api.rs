@@ -2,9 +2,13 @@ use crate::frb_generated::StreamSink;
 pub use crate::models::{
     AudioQualityOption, AudioSelectionConfidence, AudioTrackMetadata, DiscoveredFormat,
     DownloadFormatSelection, DownloadPhase, DownloadProgressEvent, DownloadSelectionKind,
-    FileSizeAccuracy, FormatSelectionStrategy, MediaInspection, StartDownloadRequest, StreamKind,
-    VideoQualityOption,
+    FileSizeAccuracy, FormatSelectionStrategy, InspectionTargetKind, MediaInspection,
+    PlaylistEntryAvailability, PlaylistEntrySummary, PlaylistEventKind, PlaylistInspection,
+    PlaylistItemState, PlaylistItemStatus, PlaylistMediaMode, PlaylistProgressEvent,
+    PlaylistQualityCap, PlaylistSessionSnapshot, StartDownloadRequest,
+    StartPlaylistDownloadRequest, StreamKind, UrlInspectionResult, VideoQualityOption,
 };
+use crate::playlist::{inspect_url_async, PlaylistManager};
 use crate::yt_dlp::{inspect_media_async, DownloadManager};
 
 /// Health check exposed over Flutter Rust Bridge.
@@ -23,6 +27,11 @@ pub fn engine_version() -> String {
 #[flutter_rust_bridge::frb(init)]
 pub fn init_app() {
     flutter_rust_bridge::setup_default_user_utils();
+}
+
+/// Inspects any URL and detects whether it is a single video or a full playlist.
+pub async fn inspect_url(url: String) -> Result<UrlInspectionResult, String> {
+    inspect_url_async(&url).await.map_err(|err| err.to_string())
 }
 
 /// Inspects a media URL using the local `yt-dlp` binary and returns metadata and formats.
@@ -59,6 +68,69 @@ pub async fn resume_download(job_id: String) -> Result<String, String> {
 /// Subscribes a Flutter stream sink to incremental Rust download progress events.
 pub fn subscribe_download_progress(sink: StreamSink<DownloadProgressEvent>) -> Result<(), String> {
     DownloadManager::global().subscribe(sink);
+    Ok(())
+}
+
+/// Starts sequential batch downloading for an enumerated playlist.
+pub async fn start_playlist_download(
+    request: StartPlaylistDownloadRequest,
+) -> Result<PlaylistSessionSnapshot, String> {
+    PlaylistManager::global()
+        .start_playlist_download(request)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Pauses an active playlist download session while retaining completed files and partial progress.
+pub async fn pause_playlist_download(session_id: String) -> Result<(), String> {
+    PlaylistManager::global()
+        .pause_playlist(&session_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Resumes a paused, canceled, or recovered playlist download session.
+pub async fn resume_playlist_download(
+    session_id: String,
+) -> Result<PlaylistSessionSnapshot, String> {
+    PlaylistManager::global()
+        .resume_playlist(&session_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Cancels remaining playlist items cleanly while preserving completed downloads.
+pub async fn cancel_playlist_download(session_id: String) -> Result<(), String> {
+    PlaylistManager::global()
+        .cancel_playlist(&session_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Retries all failed items inside a playlist download session without re-downloading completed items.
+pub async fn retry_failed_playlist_items(
+    session_id: String,
+) -> Result<PlaylistSessionSnapshot, String> {
+    PlaylistManager::global()
+        .retry_failed(&session_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Loads any saved persistent playlist manifest from disk so interrupted batches can resume.
+pub async fn load_saved_playlist_session(
+    playlist_id: String,
+    output_directory: Option<String>,
+) -> Result<Option<PlaylistSessionSnapshot>, String> {
+    PlaylistManager::global()
+        .load_saved_session(&playlist_id, output_directory)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Subscribes a Flutter stream sink to incremental playlist batch progress events.
+pub fn subscribe_playlist_progress(sink: StreamSink<PlaylistProgressEvent>) -> Result<(), String> {
+    PlaylistManager::global().subscribe(sink);
     Ok(())
 }
 

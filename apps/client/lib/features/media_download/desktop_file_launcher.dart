@@ -32,6 +32,13 @@ class WindowsDesktopFileLauncher implements DesktopFileLauncher {
       ], mode: ProcessStartMode.detached);
       return true;
     }
+    final directory = Directory(path);
+    if (await directory.exists()) {
+      await Process.start('explorer.exe', [
+        path,
+      ], mode: ProcessStartMode.detached);
+      return true;
+    }
     final parent = file.parent;
     if (await parent.exists()) {
       await Process.start('explorer.exe', [

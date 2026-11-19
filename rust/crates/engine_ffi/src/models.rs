@@ -188,3 +188,171 @@ pub struct DownloadProgressEvent {
     pub output_path: Option<String>,
     pub message: Option<String>,
 }
+
+/// Identifies whether an analyzed URL points to a single video or a playlist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InspectionTargetKind {
+    SingleVideo,
+    Playlist,
+}
+
+/// Availability state reported for a playlist entry during flat enumeration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlaylistEntryAvailability {
+    Available,
+    Private,
+    Removed,
+    Unavailable,
+}
+
+/// Metadata summary for one entry inside an enumerated playlist.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaylistEntrySummary {
+    pub order_index: u32,
+    pub video_id: String,
+    pub title: String,
+    pub url: String,
+    pub uploader: Option<String>,
+    pub duration_seconds: Option<f64>,
+    pub thumbnail_url: Option<String>,
+    pub availability: PlaylistEntryAvailability,
+    pub availability_reason: Option<String>,
+}
+
+/// Complete playlist inspection metadata and ordered entry list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaylistInspection {
+    pub id: String,
+    pub title: String,
+    pub uploader: Option<String>,
+    pub thumbnail_url: Option<String>,
+    pub webpage_url: String,
+    pub provider_name: String,
+    pub total_item_count: u32,
+    pub entries: Vec<PlaylistEntrySummary>,
+}
+
+/// Unified result returned when analyzing any single-video or playlist URL.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UrlInspectionResult {
+    pub kind: InspectionTargetKind,
+    pub video: Option<MediaInspection>,
+    pub playlist: Option<PlaylistInspection>,
+}
+
+/// Output mode selected for a playlist download batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlaylistMediaMode {
+    VideoWithSound,
+    AudioOnly,
+}
+
+/// Upper quality cap applied per playlist item without fabricating unavailable streams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlaylistQualityCap {
+    BestAvailable,
+    UpTo1080p,
+    UpTo720p,
+    UpTo480p,
+}
+
+/// Lifecycle state tracked for each individual playlist item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlaylistItemStatus {
+    Pending,
+    Analyzing,
+    Ready,
+    Downloading,
+    Merging,
+    Completed,
+    Failed,
+    Skipped,
+    Canceled,
+}
+
+/// Per-item runtime and persisted status inside a playlist session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaylistItemState {
+    pub order_index: u32,
+    pub video_id: String,
+    pub title: String,
+    pub url: String,
+    pub duration_seconds: Option<f64>,
+    pub thumbnail_url: Option<String>,
+    pub status: PlaylistItemStatus,
+    pub selected_quality: Option<String>,
+    pub audio_language: Option<AudioTrackMetadata>,
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub is_total_estimated: bool,
+    pub output_path: Option<String>,
+    pub error_message: Option<String>,
+}
+
+/// Lightweight persistent manifest & UI snapshot for a playlist download session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaylistSessionSnapshot {
+    pub session_id: String,
+    pub playlist_id: String,
+    pub playlist_title: String,
+    pub playlist_url: String,
+    pub uploader: Option<String>,
+    pub thumbnail_url: Option<String>,
+    pub output_directory: String,
+    pub media_mode: PlaylistMediaMode,
+    pub quality_cap: PlaylistQualityCap,
+    pub is_running: bool,
+    pub is_paused: bool,
+    pub completed_count: u32,
+    pub failed_count: u32,
+    pub skipped_count: u32,
+    pub total_count: u32,
+    pub items: Vec<PlaylistItemState>,
+}
+
+/// Request payload to start downloading a previously inspected playlist.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StartPlaylistDownloadRequest {
+    pub playlist: PlaylistInspection,
+    pub media_mode: PlaylistMediaMode,
+    pub quality_cap: PlaylistQualityCap,
+    pub output_directory: Option<String>,
+}
+
+/// Event discriminator for structured playlist batch progress reporting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlaylistEventKind {
+    PlaylistStarted,
+    PlaylistItemStarted,
+    PlaylistItemProgress,
+    PlaylistItemMerging,
+    PlaylistItemCompleted,
+    PlaylistItemFailed,
+    PlaylistItemSkipped,
+    PlaylistPaused,
+    PlaylistCanceled,
+    PlaylistCompleted,
+}
+
+/// Incremental playlist batch and active-item progress streamed to Flutter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaylistProgressEvent {
+    pub session_id: String,
+    pub kind: PlaylistEventKind,
+    pub item_index: Option<u32>,
+    pub item_status: Option<PlaylistItemStatus>,
+    pub selected_quality: Option<String>,
+    pub audio_language: Option<AudioTrackMetadata>,
+    pub item_downloaded_bytes: u64,
+    pub item_total_bytes: Option<u64>,
+    pub item_is_total_estimated: bool,
+    pub speed_bytes_per_sec: Option<f64>,
+    pub eta_seconds: Option<u64>,
+    pub output_path: Option<String>,
+    pub completed_count: u32,
+    pub failed_count: u32,
+    pub skipped_count: u32,
+    pub total_count: u32,
+    pub playlist_output_dir: Option<String>,
+    pub message: Option<String>,
+}

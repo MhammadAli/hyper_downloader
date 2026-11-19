@@ -31,19 +31,84 @@ class FakeDesktopFileLauncher implements DesktopFileLauncher {
 class FakeMediaDownloadRepository implements MediaDownloadRepository {
   final StreamController<DownloadProgressEvent> progressController =
       StreamController<DownloadProgressEvent>.broadcast();
+  final StreamController<PlaylistProgressEvent> playlistProgressController =
+      StreamController<PlaylistProgressEvent>.broadcast();
 
   StartDownloadRequest? lastStartRequest;
   String? lastCanceledJobId;
   String? lastResumedJobId;
+  StartPlaylistDownloadRequest? lastPlaylistRequest;
+  String? lastPausedPlaylistId;
+  String? lastResumedPlaylistId;
+  String? lastCanceledPlaylistId;
+  String? lastRetriedPlaylistId;
   bool shouldFailInspection = false;
   bool returnMissingAudio = false;
   String sampleTitle = 'Multi-Audio Test Presentation';
+  String samplePlaylistTitle = 'Blender HQ Tutorials';
+  String samplePlaylistFirstItemTitle = 'Episode One';
 
   @override
   String ping() => 'pong';
 
   @override
   String engineVersion() => '0.1.0';
+
+  @override
+  Future<UrlInspectionResult> inspectUrl(String url) async {
+    if (shouldFailInspection) {
+      throw Exception('Simulated extraction failure');
+    }
+
+    if (url.contains('playlist?list=')) {
+      return UrlInspectionResult(
+        kind: InspectionTargetKind.playlist,
+        playlist: PlaylistInspection(
+          id: 'PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+          title: samplePlaylistTitle,
+          uploader: 'Blender Foundation',
+          thumbnailUrl: null,
+          webpageUrl: url,
+          providerName: 'Youtube',
+          totalItemCount: 3,
+          entries: [
+            PlaylistEntrySummary(
+              orderIndex: 0,
+              videoId: 'vid0',
+              title: samplePlaylistFirstItemTitle,
+              url: 'https://www.youtube.com/watch?v=vid0',
+              uploader: 'Blender Foundation',
+              durationSeconds: 95.0,
+              availability: PlaylistEntryAvailability.available,
+            ),
+            const PlaylistEntrySummary(
+              orderIndex: 1,
+              videoId: 'priv1',
+              title: '[Private video]',
+              url: 'https://www.youtube.com/watch?v=priv1',
+              availability: PlaylistEntryAvailability.private,
+              availabilityReason: 'Private video is inaccessible.',
+            ),
+            const PlaylistEntrySummary(
+              orderIndex: 2,
+              videoId: 'vid2',
+              title: 'Episode Two',
+              url: 'https://www.youtube.com/watch?v=vid2',
+              uploader: 'Blender Foundation',
+              durationSeconds: 140.0,
+              availability: PlaylistEntryAvailability.available,
+            ),
+          ],
+        ),
+      );
+    }
+
+    final single = await inspectMedia(url);
+    return UrlInspectionResult(
+      kind: InspectionTargetKind.singleVideo,
+      video: single,
+    );
+  }
 
   @override
   Future<MediaInspection> inspectMedia(String url) async {
@@ -152,7 +217,88 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
   Stream<DownloadProgressEvent> watchDownloadProgress() =>
       progressController.stream;
 
-  Future<void> dispose() => progressController.close();
+  @override
+  Future<PlaylistSessionSnapshot> startPlaylistDownload(
+    StartPlaylistDownloadRequest request,
+  ) async {
+    lastPlaylistRequest = request;
+    return PlaylistSessionSnapshot(
+      sessionId: 'pl-session-fake',
+      playlistId: request.playlist.id,
+      playlistTitle: request.playlist.title,
+      playlistUrl: request.playlist.webpageUrl,
+      uploader: request.playlist.uploader,
+      thumbnailUrl: request.playlist.thumbnailUrl,
+      outputDirectory:
+          r'F:\Downloads\Blender HQ Tutorials [PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB]',
+      mediaMode: request.mediaMode,
+      qualityCap: request.qualityCap,
+      isRunning: true,
+      isPaused: false,
+      completedCount: 0,
+      failedCount: 0,
+      skippedCount: 1,
+      totalCount: request.playlist.totalItemCount,
+      items: request.playlist.entries
+          .map(
+            (e) => PlaylistItemState(
+              orderIndex: e.orderIndex,
+              videoId: e.videoId,
+              title: e.title,
+              url: e.url,
+              durationSeconds: e.durationSeconds,
+              status: e.availability == PlaylistEntryAvailability.available
+                  ? PlaylistItemStatus.pending
+                  : PlaylistItemStatus.skipped,
+              downloadedBytes: BigInt.zero,
+              isTotalEstimated: false,
+              errorMessage: e.availabilityReason,
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  @override
+  Future<void> pausePlaylistDownload(String sessionId) async {
+    lastPausedPlaylistId = sessionId;
+  }
+
+  @override
+  Future<PlaylistSessionSnapshot> resumePlaylistDownload(
+    String sessionId,
+  ) async {
+    lastResumedPlaylistId = sessionId;
+    return startPlaylistDownload(lastPlaylistRequest!);
+  }
+
+  @override
+  Future<void> cancelPlaylistDownload(String sessionId) async {
+    lastCanceledPlaylistId = sessionId;
+  }
+
+  @override
+  Future<PlaylistSessionSnapshot> retryFailedPlaylistItems(
+    String sessionId,
+  ) async {
+    lastRetriedPlaylistId = sessionId;
+    return startPlaylistDownload(lastPlaylistRequest!);
+  }
+
+  @override
+  Future<PlaylistSessionSnapshot?> loadSavedPlaylistSession({
+    required String playlistId,
+    String? outputDirectory,
+  }) async => null;
+
+  @override
+  Stream<PlaylistProgressEvent> watchPlaylistProgress() =>
+      playlistProgressController.stream;
+
+  Future<void> dispose() async {
+    await progressController.close();
+    await playlistProgressController.close();
+  }
 }
 
 void main() {
@@ -418,5 +564,241 @@ void main() {
         findsOneWidget,
       );
     });
+
+    testWidgets(
+      'supports full playlist workflow: mode, quality caps, skipped items, live progress without overall ETA, failure retry, pause/resume/cancel, and folder actions',
+      (WidgetTester tester) async {
+        await tester.pumpWidget(
+          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
+        );
+        await tester.pump();
+
+        await tester.enterText(
+          find.byKey(const Key('url_input_field')),
+          'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+        );
+        await tester.tap(find.byKey(const Key('analyze_url_button')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('playlist_header_card')), findsOneWidget);
+        expect(find.text('Blender HQ Tutorials'), findsOneWidget);
+        expect(find.text('3 items'), findsOneWidget);
+        expect(find.text('1 unavailable'), findsOneWidget);
+        expect(find.text('Skipped'), findsOneWidget);
+        expect(find.byKey(const Key('playlist_items_card')), findsOneWidget);
+
+        // Verify default mode & quality cap chips, toggle Audio Only and back.
+        expect(find.text('Best Available'), findsOneWidget);
+        expect(find.text('Up to 1080p'), findsOneWidget);
+        expect(find.text('Up to 720p'), findsOneWidget);
+        expect(find.text('Up to 480p'), findsOneWidget);
+
+        await tester.tap(find.text('Audio Only'));
+        await tester.pumpAndSettle();
+        expect(find.text('Up to 720p'), findsNothing);
+
+        await tester.tap(find.text('Video with Sound'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Up to 720p'));
+        await tester.pump();
+
+        // Start playlist download.
+        await tester.ensureVisible(
+          find.byKey(const Key('start_playlist_button')),
+        );
+        await tester.tap(find.byKey(const Key('start_playlist_button')));
+        await tester.pumpAndSettle();
+
+        expect(
+          fakeRepo.lastPlaylistRequest?.qualityCap,
+          PlaylistQualityCap.upTo720P,
+        );
+        expect(
+          find.byKey(const Key('playlist_overall_progress')),
+          findsOneWidget,
+        );
+        expect(find.text('0 / 3 completed'), findsOneWidget);
+
+        // Active item progress & completion (no raw format IDs, no overall playlist ETA).
+        const item0Path =
+            r'F:\Downloads\Blender HQ Tutorials [PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB]\001 - Episode One.mp4';
+        fakeRepo.playlistProgressController.add(
+          PlaylistProgressEvent(
+            sessionId: 'pl-session-fake',
+            kind: PlaylistEventKind.playlistItemProgress,
+            itemIndex: 0,
+            itemStatus: PlaylistItemStatus.downloading,
+            selectedQuality: '720p MP4',
+            audioLanguage: const AudioTrackMetadata(
+              language: 'en',
+              languageDisplayName: 'English',
+              isOriginal: true,
+              isDefault: true,
+              isAutoDub: false,
+              selectionConfidence: AudioSelectionConfidence.confirmedOriginal,
+              statusNote: 'Audio included automatically · Original: English',
+            ),
+            itemDownloadedBytes: BigInt.from(5242880),
+            itemTotalBytes: BigInt.from(10485760),
+            itemIsTotalEstimated: false,
+            speedBytesPerSec: 1048576.0,
+            etaSeconds: BigInt.from(5),
+            completedCount: 0,
+            failedCount: 0,
+            skippedCount: 1,
+            totalCount: 3,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('playlist_active_item_panel')),
+          findsOneWidget,
+        );
+        expect(find.text('Quality: 720p MP4'), findsOneWidget);
+        expect(find.text('Item ETA: 00:05'), findsOneWidget);
+        expect(find.textContaining('Overall ETA'), findsNothing);
+        expect(find.textContaining('140-19'), findsNothing);
+
+        // Pause -> Resume controls.
+        await tester.tap(find.byKey(const Key('pause_playlist_button')));
+        await tester.pump();
+        expect(fakeRepo.lastPausedPlaylistId, 'pl-session-fake');
+
+        fakeRepo.playlistProgressController.add(
+          PlaylistProgressEvent(
+            sessionId: 'pl-session-fake',
+            kind: PlaylistEventKind.playlistPaused,
+            itemIndex: 0,
+            itemStatus: PlaylistItemStatus.canceled,
+            itemDownloadedBytes: BigInt.from(5242880),
+            itemTotalBytes: BigInt.from(10485760),
+            itemIsTotalEstimated: false,
+            completedCount: 0,
+            failedCount: 0,
+            skippedCount: 1,
+            totalCount: 3,
+            message: 'Playlist paused.',
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('resume_playlist_button')));
+        await tester.pump();
+        expect(fakeRepo.lastResumedPlaylistId, 'pl-session-fake');
+
+        // Item 0 completes; Item 2 fails -> Retry Failed becomes enabled.
+        fakeRepo.playlistProgressController.add(
+          PlaylistProgressEvent(
+            sessionId: 'pl-session-fake',
+            kind: PlaylistEventKind.playlistItemCompleted,
+            itemIndex: 0,
+            itemStatus: PlaylistItemStatus.completed,
+            selectedQuality: '720p MP4',
+            itemDownloadedBytes: BigInt.from(10485760),
+            itemTotalBytes: BigInt.from(10485760),
+            itemIsTotalEstimated: false,
+            outputPath: item0Path,
+            completedCount: 1,
+            failedCount: 0,
+            skippedCount: 1,
+            totalCount: 3,
+          ),
+        );
+        fakeRepo.playlistProgressController.add(
+          PlaylistProgressEvent(
+            sessionId: 'pl-session-fake',
+            kind: PlaylistEventKind.playlistItemFailed,
+            itemIndex: 2,
+            itemStatus: PlaylistItemStatus.failed,
+            itemDownloadedBytes: BigInt.zero,
+            itemIsTotalEstimated: false,
+            completedCount: 1,
+            failedCount: 1,
+            skippedCount: 1,
+            totalCount: 3,
+            message: 'Network timeout',
+          ),
+        );
+        fakeRepo.playlistProgressController.add(
+          PlaylistProgressEvent(
+            sessionId: 'pl-session-fake',
+            kind: PlaylistEventKind.playlistCompleted,
+            itemDownloadedBytes: BigInt.zero,
+            itemIsTotalEstimated: false,
+            completedCount: 1,
+            failedCount: 1,
+            skippedCount: 1,
+            totalCount: 3,
+            message: 'Batch finished with 1 failed.',
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('1 / 3 completed'), findsOneWidget);
+        expect(find.text('1 failed'), findsOneWidget);
+        expect(find.text('Network timeout'), findsOneWidget);
+
+        // Reveal overall playlist folder & item folder.
+        await tester.ensureVisible(
+          find.byKey(const Key('playlist_open_folder_button')),
+        );
+        await tester.tap(find.byKey(const Key('playlist_open_folder_button')));
+        await tester.pump();
+        expect(
+          fakeLauncher.lastRevealedFile,
+          r'F:\Downloads\Blender HQ Tutorials [PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB]',
+        );
+
+        await tester.ensureVisible(
+          find.byKey(const Key('playlist_item_folder_0')),
+        );
+        await tester.tap(find.byKey(const Key('playlist_item_folder_0')));
+        await tester.pump();
+        expect(fakeLauncher.lastRevealedFile, item0Path);
+
+        // Trigger Retry Failed -> then Cancel.
+        await tester.ensureVisible(
+          find.byKey(const Key('retry_failed_playlist_button')),
+        );
+        await tester.tap(find.byKey(const Key('retry_failed_playlist_button')));
+        await tester.pumpAndSettle();
+        expect(fakeRepo.lastRetriedPlaylistId, 'pl-session-fake');
+
+        await tester.tap(find.byKey(const Key('cancel_playlist_button')));
+        await tester.pump();
+        expect(fakeRepo.lastCanceledPlaylistId, 'pl-session-fake');
+      },
+    );
+
+    testWidgets(
+      'renders long Arabic RTL playlist and item titles in narrow 460px windows without overflow',
+      (WidgetTester tester) async {
+        tester.view.physicalSize = const Size(460, 760);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        fakeRepo.samplePlaylistTitle =
+            'قائمة تشغيل تعليمية شاملة باللغة العربية لتعلم البرمجة وتطوير التطبيقات الحديثة خطوة بخطوة';
+        fakeRepo.samplePlaylistFirstItemTitle =
+            'الدرس الأول: شرح كامل ومفصل لكيفية التعامل مع قوائم التشغيل الطويلة باللغة العربية دون أي مشاكل';
+
+        await tester.pumpWidget(
+          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
+        );
+        await tester.pump();
+
+        await tester.enterText(
+          find.byKey(const Key('url_input_field')),
+          'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+        );
+        await tester.tap(find.byKey(const Key('analyze_url_button')));
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('قائمة تشغيل تعليمية'), findsOneWidget);
+        expect(find.textContaining('الدرس الأول'), findsOneWidget);
+      },
+    );
   });
 }

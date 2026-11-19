@@ -7,6 +7,7 @@ import 'package:hyper_download_client/core/bridge/models.dart';
 import 'package:hyper_download_client/features/media_download/desktop_file_launcher.dart';
 import 'package:hyper_download_client/features/media_download/media_download_cubit.dart';
 import 'package:hyper_download_client/features/media_download/media_download_state.dart';
+import 'package:hyper_download_client/features/media_download/playlist_view.dart';
 
 /// Polished dark-first desktop UI for HyperDownload with smooth finite animations:
 /// Paste URL -> Analyze -> Choose Quality -> Download / Pause / Resume / Open Folder.
@@ -206,13 +207,15 @@ class _MediaDownloadScreenState extends State<MediaDownloadScreen> {
                         alignment: Alignment.topCenter,
                         child:
                             (state.inspectionError != null ||
-                                state.downloadError != null)
+                                state.downloadError != null ||
+                                state.playlistError != null)
                             ? Padding(
                                 padding: const EdgeInsets.only(top: 16),
                                 child: _AnimatedEntrance(
                                   child: _ErrorBanner(
                                     message:
-                                        (state.downloadError ??
+                                        (state.playlistError ??
+                                        state.downloadError ??
                                         state.inspectionError)!,
                                   ),
                                 ),
@@ -223,7 +226,23 @@ class _MediaDownloadScreenState extends State<MediaDownloadScreen> {
                         duration: const Duration(milliseconds: 280),
                         curve: Curves.easeOutCubic,
                         alignment: Alignment.topCenter,
-                        child: state.inspection != null
+                        child: state.isPlaylistTarget
+                            ? Padding(
+                                padding: const EdgeInsets.only(top: 16),
+                                child: _AnimatedEntrance(
+                                  key: ValueKey(
+                                    'playlist_${state.playlistInspection!.id}',
+                                  ),
+                                  child: PlaylistView(
+                                    state: state,
+                                    onOpenFile: (path) =>
+                                        _openFile(context, path),
+                                    onRevealInFolder: (path) =>
+                                        _revealInFolder(context, path),
+                                  ),
+                                ),
+                              )
+                            : state.inspection != null
                             ? Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
@@ -252,9 +271,10 @@ class _MediaDownloadScreenState extends State<MediaDownloadScreen> {
                         curve: Curves.easeOutCubic,
                         alignment: Alignment.topCenter,
                         child:
-                            (state.inspection != null ||
-                                state.latestProgress != null ||
-                                state.activeJobId != null)
+                            (!state.isPlaylistTarget &&
+                                (state.inspection != null ||
+                                    state.latestProgress != null ||
+                                    state.activeJobId != null))
                             ? Padding(
                                 padding: const EdgeInsets.only(top: 16),
                                 child: _AnimatedEntrance(
@@ -341,8 +361,9 @@ class _UrlInputCard extends StatelessWidget {
               onChanged: onUrlChanged,
               onSubmitted: (_) => onAnalyze(),
               decoration: InputDecoration(
-                labelText: 'Paste video or Shorts link',
-                hintText: 'https://www.youtube.com/watch?v=...',
+                labelText: 'Paste video, Shorts, or playlist link',
+                hintText:
+                    'https://www.youtube.com/watch?v=... or playlist?list=...',
                 prefixIcon: Icon(Icons.link_rounded, color: scheme.secondary),
                 suffixIcon: hasUrlText && !isAnalyzing
                     ? IconButton(

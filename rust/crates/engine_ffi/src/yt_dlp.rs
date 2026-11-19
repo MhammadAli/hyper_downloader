@@ -345,7 +345,7 @@ pub fn parse_yt_dlp_inspection_json(raw_json: &str) -> Result<MediaInspection, E
     })
 }
 
-fn extract_thumbnail_url(obj: &serde_json::Map<String, Value>) -> Option<String> {
+pub(crate) fn extract_thumbnail_url(obj: &serde_json::Map<String, Value>) -> Option<String> {
     if let Some(thumb) = json_non_empty_str(obj.get("thumbnail")) {
         return Some(thumb);
     }
@@ -358,7 +358,7 @@ fn extract_thumbnail_url(obj: &serde_json::Map<String, Value>) -> Option<String>
         })
 }
 
-fn infer_provider_from_url(url: &str) -> String {
+pub(crate) fn infer_provider_from_url(url: &str) -> String {
     Url::parse(url)
         .ok()
         .and_then(|parsed| parsed.host_str().map(str::to_string))
@@ -497,7 +497,7 @@ fn normalize_codec(val: Option<&Value>) -> Option<String> {
     }
 }
 
-fn json_non_empty_str(val: Option<&Value>) -> Option<String> {
+pub(crate) fn json_non_empty_str(val: Option<&Value>) -> Option<String> {
     let s = val?.as_str()?.trim();
     if s.is_empty() {
         None
@@ -506,7 +506,7 @@ fn json_non_empty_str(val: Option<&Value>) -> Option<String> {
     }
 }
 
-fn json_u64(val: Option<&Value>) -> Option<u64> {
+pub(crate) fn json_u64(val: Option<&Value>) -> Option<u64> {
     match val? {
         Value::Number(n) => n.as_u64().or_else(|| {
             n.as_f64()
@@ -525,7 +525,7 @@ fn json_i32(val: Option<&Value>) -> Option<i32> {
     val?.as_i64().and_then(|v| i32::try_from(v).ok())
 }
 
-fn json_f64(val: Option<&Value>) -> Option<f64> {
+pub(crate) fn json_f64(val: Option<&Value>) -> Option<f64> {
     val?.as_f64().filter(|f| f.is_finite())
 }
 
@@ -745,7 +745,7 @@ fn validate_format_id(value: &str, field_name: &str) -> Result<(), EngineError> 
     Ok(())
 }
 
-fn configure_subprocess(cmd: &mut Command) {
+pub(crate) fn configure_subprocess(cmd: &mut Command) {
     // Ensure Python inside standalone `yt-dlp.exe` always emits valid UTF-8 paths
     // on Windows pipes (critical for Arabic and non-ASCII video titles).
     cmd.env("PYTHONUTF8", "1");
@@ -756,7 +756,7 @@ fn configure_subprocess(cmd: &mut Command) {
     }
 }
 
-fn shared_runtime() -> &'static tokio::runtime::Runtime {
+pub(crate) fn shared_runtime() -> &'static tokio::runtime::Runtime {
     static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
