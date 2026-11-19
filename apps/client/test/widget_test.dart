@@ -191,6 +191,8 @@ void main() {
       expect(find.text('HyperDownload'), findsOneWidget);
       expect(find.textContaining('pong'), findsNothing);
       expect(find.byKey(const Key('error_banner')), findsNothing);
+      final scaffoldCtx = tester.element(find.byType(Scaffold));
+      expect(Theme.of(scaffoldCtx).brightness, Brightness.dark);
 
       await tester.pumpWidget(const SizedBox.shrink());
       RustLib.dispose();
