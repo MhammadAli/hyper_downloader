@@ -342,8 +342,17 @@ HyperDownload **does not rely exclusively on `JobService.onStopJob()`**, because
 
 ### 6.5 Android Storage Architecture
 
-- **Active Downloads Staging:** Written inside app-specific external storage (`context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)/staging/<job_id>/`), giving Rust and `yt-dlp`/FFmpeg direct POSIX `Seek`/`Write` performance without SAF/MediaStore IPC overhead.
-- **Completed Downloads:** Exported atomically via `MediaStore.Downloads` (API 29+) or user-chosen SAF directory URI upon verified completion, then staging files are cleaned up.
+- **Active Downloads Staging:** Written inside app-specific external storage (`context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)/staging/`), giving Python/`yt-dlp`/FFmpeg direct POSIX `Seek`/`Write` performance without SAF/MediaStore IPC overhead.
+- **Completed Downloads:** Exported atomically and verified by byte count via `MediaStore.Downloads` (`Download/HyperDownload[/<playlist_subfolder>]`, API 29+, using `IS_PENDING`) or legacy external Downloads on API 26-28, with staging cleanup after export.
+
+### 6.6 Verified Android Integration Bridge (Chaquopy + Canonical Rust C-ABI)
+
+Rather than compiling an alternative pure-Python audio/playlist selection policy or invoking `rust/crates/engine_ffi` via FRB inside Android's UI isolate:
+- **Flutter UI -> Kotlin:** `Platform.isAndroid` skips `RustLib.init()` and binds `AndroidMediaDownloadRepository` and `AndroidFileLauncher` to `com.hyperdownload/media_engine` (`MethodChannel`), `com.hyperdownload/platform_intents` (`ACTION_SEND` Share Intent cold/warm handoff), and three `EventChannel`s (`download_progress`, `playlist_progress`, `playlist_size_estimate`).
+- **Kotlin -> Python Worker:** `AndroidDownloadEngine` starts Chaquopy `17.2.0` (Python `3.13`, host `buildPython 3.13`) and drives `apps/client/android/app/src/main/python/hyperdl_worker.py` (`yt-dlp==2026.10.26`, `yt-dlp-ejs==0.8.0`, `certifi`), provisioning symlinked executables (`qjs` -> `libqjs.so`, `ffmpeg` -> `libffmpeg.so`, `ffprobe` -> `libffprobe.so`) inside `filesDir/bin`.
+- **Canonical Selection Parity:** `hyperdl_worker.py` loads `libengine_ffi.so` via `ctypes` and invokes stateless C-ABI entrypoints (`hyperdl_parse_media_inspection_json`, `hyperdl_parse_playlist_inspection_json`, `hyperdl_select_playlist_item_option_json`, `hyperdl_build_playlist_size_estimate_json`, `hyperdl_classify_url_json`, `hyperdl_free_string`), ensuring Windows and Android share the exact `selection.rs` Original Audio, auto-dub rejection, quality-cap, and size-accuracy rules.
+- **Background Execution & Checkpointing:** `HyperDownloadTransferScheduler` uses User-Initiated Data Transfer jobs (`HyperDownloadJobService`, `setUserInitiated(true)`) on Android 14+ (API 34+) and a `dataSync` foreground service (`HyperDownloadForegroundService`) on API 26-33, backed by continuous JSON checkpoints (`active_single_transfer.json`, `active_playlist_pointer.json`, `.hyperdl_playlist_session.json`) rather than relying solely on `onStopJob()`.
+- **Supported ABIs (Initial Release):** `arm64-v8a` and `x86_64` only, all 16 KB ELF page-aligned (`LOAD` align `2**14` / `2**16`). 32-bit ARM (`armeabi-v7a`) and 32-bit x86 are explicitly excluded.
 
 ---
 

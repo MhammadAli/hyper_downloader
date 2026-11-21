@@ -1,4 +1,6 @@
 pub mod api;
+#[flutter_rust_bridge::frb(ignore)]
+pub mod c_api;
 mod frb_generated;
 pub mod models;
 pub mod playlist;

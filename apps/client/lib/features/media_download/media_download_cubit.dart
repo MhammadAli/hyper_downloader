@@ -8,15 +8,21 @@ import 'package:hyper_download_client/features/media_download/media_download_sta
 /// Coordinates URL analysis, simplified quality selection, single-job & playlist downloads.
 class MediaDownloadCubit extends Cubit<MediaDownloadState> {
   final MediaDownloadRepository _repository;
+  final Future<String?> Function()? getInitialSharedUrl;
+  final Stream<String>? sharedUrls;
   StreamSubscription<DownloadProgressEvent>? _progressSubscription;
   StreamSubscription<PlaylistProgressEvent>? _playlistProgressSubscription;
   StreamSubscription<PlaylistSizeEstimate>? _sizeEstimateSubscription;
+  StreamSubscription<String>? _sharedUrlSubscription;
   final List<PlaylistProgressEvent> _pendingPlaylistEvents = [];
   int _sizeEstimateRequestSeq = 0;
   bool _pauseRequested = false;
 
-  MediaDownloadCubit({required this._repository})
-    : super(const MediaDownloadState());
+  MediaDownloadCubit({
+    required this._repository,
+    this.getInitialSharedUrl,
+    this.sharedUrls,
+  }) : super(const MediaDownloadState());
 
   /// Checks Rust FFI connectivity and subscribes to live progress events.
   void initialize() {
@@ -70,6 +76,35 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
         // Non-fatal: size summary card displays partial or unavailable status cleanly.
       },
     );
+
+    _sharedUrlSubscription?.cancel();
+    final sharedStream = sharedUrls;
+    if (sharedStream != null) {
+      _sharedUrlSubscription = sharedStream.listen(_handleIncomingSharedUrl);
+    }
+    final initialFetcher = getInitialSharedUrl;
+    if (initialFetcher != null) {
+      unawaited(_consumeInitialSharedUrl(initialFetcher));
+    }
+  }
+
+  Future<void> _consumeInitialSharedUrl(
+    Future<String?> Function() fetcher,
+  ) async {
+    try {
+      final url = await fetcher();
+      _handleIncomingSharedUrl(url);
+    } catch (_) {
+      // Ignore startup shared-intent read failures so manual paste still works.
+    }
+  }
+
+  void _handleIncomingSharedUrl(String? rawUrl) {
+    final cleaned = rawUrl?.trim() ?? '';
+    if (cleaned.isEmpty) {
+      return;
+    }
+    unawaited(analyzeUrl(cleaned));
   }
 
   void updateUrl(String url) {
@@ -810,6 +845,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
     await _progressSubscription?.cancel();
     await _playlistProgressSubscription?.cancel();
     await _sizeEstimateSubscription?.cancel();
+    await _sharedUrlSubscription?.cancel();
     return super.close();
   }
 }

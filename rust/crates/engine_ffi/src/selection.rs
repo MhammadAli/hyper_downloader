@@ -952,7 +952,7 @@ pub(crate) fn format_bytes_human(bytes: u64) -> String {
 }
 
 /// Concrete format selection resolved for one playlist item after applying the requested cap.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ResolvedPlaylistSelection {
     pub selection: DownloadFormatSelection,
     pub quality_label: String,

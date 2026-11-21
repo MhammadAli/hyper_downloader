@@ -5,6 +5,8 @@ rust/target/
 tools/windows_media_prototype/bin/
 tools/windows_media_prototype/output/*
 !tools/windows_media_prototype/output/.gitkeep
+tools/android_binaries/build_cache/
+apps/client/android/app/src/main/jniLibs/
 
 # Media & archive binaries
 *.exe

@@ -213,6 +213,7 @@ void main() {
     late StreamController<DownloadProgressEvent> progressController;
     late StreamController<PlaylistProgressEvent> playlistProgressController;
     late StreamController<PlaylistSizeEstimate> sizeEstimateController;
+    late StreamController<String> sharedUrlController;
 
     setUp(() {
       repo = MockMediaDownloadRepository();
@@ -221,6 +222,7 @@ void main() {
           StreamController<PlaylistProgressEvent>.broadcast();
       sizeEstimateController =
           StreamController<PlaylistSizeEstimate>.broadcast();
+      sharedUrlController = StreamController<String>.broadcast();
 
       when(() => repo.ping()).thenReturn('pong');
       when(() => repo.engineVersion()).thenReturn('0.1.0');
@@ -274,6 +276,7 @@ void main() {
       await progressController.close();
       await playlistProgressController.close();
       await sizeEstimateController.close();
+      await sharedUrlController.close();
     });
 
     blocTest<MediaDownloadCubit, MediaDownloadState>(
@@ -918,6 +921,74 @@ void main() {
       },
       verify: (_) {
         verify(() => repo.estimatePlaylistSize(any())).called(3);
+      },
+    );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'auto-inspects initial cold-start shared URL when engine initializes',
+      build: () {
+        final video = _sampleInspection();
+        when(() => repo.inspectUrl(any())).thenAnswer(
+          (_) async => UrlInspectionResult(
+            kind: InspectionTargetKind.singleVideo,
+            video: video,
+          ),
+        );
+        return MediaDownloadCubit(
+          repository: repo,
+          getInitialSharedUrl: () async =>
+              'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
+        );
+      },
+      act: (cubit) async {
+        cubit.initialize();
+        await Future<void>.delayed(Duration.zero);
+      },
+      verify: (cubit) {
+        verify(
+          () => repo.inspectUrl('https://www.youtube.com/watch?v=TsT1ntGyj4Q'),
+        ).called(1);
+        expect(
+          cubit.state.urlInput,
+          'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
+        );
+        expect(cubit.state.inspectionStatus, InspectionStatus.loaded);
+      },
+    );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'auto-inspects warm-start shared playlist URL pushed over sharedUrls stream',
+      build: () {
+        final playlist = _samplePlaylistInspection();
+        when(() => repo.inspectUrl(any())).thenAnswer(
+          (_) async => UrlInspectionResult(
+            kind: InspectionTargetKind.playlist,
+            playlist: playlist,
+          ),
+        );
+        return MediaDownloadCubit(
+          repository: repo,
+          sharedUrls: sharedUrlController.stream,
+        );
+      },
+      act: (cubit) async {
+        cubit.initialize();
+        sharedUrlController.add(
+          'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+        );
+        await Future<void>.delayed(Duration.zero);
+      },
+      verify: (cubit) {
+        verify(
+          () => repo.inspectUrl(
+            'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+          ),
+        ).called(1);
+        expect(cubit.state.targetKind, InspectionTargetKind.playlist);
+        expect(
+          cubit.state.playlistInspection?.id,
+          'PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+        );
       },
     );
   });

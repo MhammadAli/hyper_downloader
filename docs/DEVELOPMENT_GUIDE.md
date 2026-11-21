@@ -148,6 +148,21 @@ flutter run -d windows
 flutter run -d android
 ```
 
+### Android Native Tooling, ABI Exclusion, and APK Builds
+
+- **Target ABIs:** `arm64-v8a` and `x86_64` only (`minSdk = 26`, NDK `28.2.13676358`). **32-bit ARM (`armeabi-v7a`) is explicitly excluded** from the initial release (`apps/client/android/gradle.properties` sets `disable-abi-filtering=true`, `build.gradle.kts` sets `ndk.abiFilters` to `arm64-v8a` + `x86_64`, and `cargokit/gradle/plugin.gradle` builds `android-arm64` + `android-x64` only).
+- **Chaquopy & Python Runtime:** Chaquopy `17.2.0` configured with Python `3.13` (matching host Python `3.13.x` via `%LOCALAPPDATA%\Programs\Python\Python313\python.exe` or `HYPERDL_BUILD_PYTHON`), bundling `yt-dlp==2026.10.26`, `yt-dlp-ejs==0.8.0`, and `certifi`.
+- **16 KB Native Tool Binaries:** QuickJS-NG (`v0.18.0`, `libqjs.so`) and LGPL-2.1 FFmpeg/FFprobe (`7.1.1`, `libffmpeg.so`, `libffprobe.so`) are provisioned into `apps/client/android/app/src/main/jniLibs/<abi>/` by `tools/android_binaries/provision_android_binaries.ps1` (excluded from git via `.gitignore`).
+- **Build & Verified Output Sizes:**
+  ```powershell
+  Push-Location apps/client
+  flutter build apk --debug
+  flutter build apk --release
+  Pop-Location
+  ```
+  - Debug APK (`apps/client/build/app/outputs/flutter-apk/app-debug.apk`): **114,660,995 bytes (109.35 MB)** — `29` `.so` libraries across `arm64-v8a` and `x86_64`, all 16 KB ELF aligned.
+  - Release APK (`apps/client/build/app/outputs/flutter-apk/app-release.apk`): **52,932,604 bytes (50.48 MB)** — `30` `.so` libraries across `arm64-v8a` and `x86_64`, all 16 KB ELF aligned.
+
 ---
 
 ## 5. Revised Implementation Plan & Milestone Protocol
