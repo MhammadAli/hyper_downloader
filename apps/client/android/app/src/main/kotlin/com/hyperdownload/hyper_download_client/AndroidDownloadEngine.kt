@@ -26,6 +26,7 @@ data class NotificationSummary(
     val subtitle: String,
     val percent: Int?,
     val indeterminate: Boolean,
+    val bigText: String? = null,
 )
 
 /**
@@ -61,6 +62,8 @@ object AndroidDownloadEngine {
 
     private var lastNotificationMs = 0L
     private var lastCheckpointMs = 0L
+    private var lastPlaylistNotificationPhase: String? = null
+    private var lastPlaylistNotificationTitle: String? = null
     private var latestNotificationSummary = NotificationSummary(
         title = "HyperDownload",
         subtitle = "Preparing transfer...",
@@ -856,7 +859,12 @@ object AndroidDownloadEngine {
                         message = "Analyzing '$itemTitle'...",
                     ),
                 )
-                updatePlaylistNotification(appCtx, record.snapshot, "Analyzing: $itemTitle")
+                updatePlaylistNotification(
+                    appCtx = appCtx,
+                    snap = record.snapshot,
+                    itemTitle = itemTitle,
+                    phase = "Analyzing",
+                )
 
                 val inspectRaw = runCatching {
                     workerModule(appCtx).callAttr(
@@ -981,9 +989,13 @@ object AndroidDownloadEngine {
                         }.toString(),
                     )
                     updatePlaylistNotification(
-                        appCtx,
-                        record.snapshot,
-                        if (isMerging) "Merging: $itemTitle" else "Downloading: $itemTitle",
+                        appCtx = appCtx,
+                        snap = record.snapshot,
+                        itemTitle = itemTitle,
+                        phase = if (isMerging) "Merging" else "Downloading",
+                        downloadedBytes = down,
+                        totalBytes = tot,
+                        speedBytesPerSec = speed,
                     )
                 }
 
@@ -1554,31 +1566,101 @@ object AndroidDownloadEngine {
     private fun updatePlaylistNotification(
         appCtx: Context,
         snap: JSONObject,
-        subtitle: String,
+        itemTitle: String,
+        phase: String,
+        downloadedBytes: Long = 0L,
+        totalBytes: Long? = null,
+        speedBytesPerSec: Double? = null,
     ) {
         val now = System.currentTimeMillis()
-        if (now - lastNotificationMs < 500L && !subtitle.startsWith("Analyzing")) {
+        val phaseChanged =
+            phase != lastPlaylistNotificationPhase || itemTitle != lastPlaylistNotificationTitle
+        if (!phaseChanged && now - lastNotificationMs < 500L) {
             return
         }
         lastNotificationMs = now
+        lastPlaylistNotificationPhase = phase
+        lastPlaylistNotificationTitle = itemTitle
+
         val completed = snap.optInt("completed_count", 0)
-        val skipped = snap.optInt("skipped_count", 0)
         val total = snap.optInt("total_count", 0).coerceAtLeast(1)
-        val pct = (((completed + skipped).toDouble() / total.toDouble()) * 100.0).toInt()
-            .coerceIn(0, 100)
         val title = "${snap.optString("playlist_title")} ($completed/$total)"
+
+        val safeSpeed = speedBytesPerSec?.takeIf { !it.isNaN() && !it.isInfinite() && it > 0.0 }
+        val itemPercent = if (phase == "Downloading" && totalBytes != null && totalBytes > 0L) {
+            ((downloadedBytes.toDouble() / totalBytes.toDouble()) * 100.0).toInt().coerceIn(0, 100)
+        } else {
+            null
+        }
+
+        val (subtitle, bigText, indeterminate) = when (phase) {
+            "Merging" -> Triple(
+                "Merging · $itemTitle",
+                "Merging: $itemTitle\nCombining video & audio with FFmpeg...",
+                true,
+            )
+
+            "Downloading" -> {
+                val statsParts = mutableListOf<String>()
+                if (itemPercent != null) {
+                    statsParts.add("$itemPercent%")
+                } else if (downloadedBytes > 0L) {
+                    statsParts.add(formatBytesHuman(downloadedBytes))
+                }
+                if (safeSpeed != null) {
+                    statsParts.add(formatSpeedHuman(safeSpeed))
+                }
+                val statsPrefix = statsParts.joinToString(" · ")
+                val collapsed = if (statsPrefix.isNotEmpty()) {
+                    "$statsPrefix · $itemTitle"
+                } else {
+                    "Downloading: $itemTitle"
+                }
+
+                val detailParts = mutableListOf<String>()
+                if (statsPrefix.isNotEmpty()) {
+                    detailParts.add(statsPrefix)
+                }
+                if (totalBytes != null && totalBytes > 0L) {
+                    detailParts.add(
+                        "(${formatBytesHuman(downloadedBytes)} / ${formatBytesHuman(totalBytes)})",
+                    )
+                } else if (itemPercent == null && downloadedBytes > 0L && safeSpeed != null) {
+                    detailParts.add("(${formatBytesHuman(downloadedBytes)})")
+                }
+                val detailLine = if (detailParts.isNotEmpty()) {
+                    detailParts.joinToString(" ")
+                } else {
+                    "Downloading video stream..."
+                }
+                Triple(
+                    collapsed,
+                    "Downloading: $itemTitle\n$detailLine",
+                    itemPercent == null,
+                )
+            }
+
+            else -> Triple(
+                "Analyzing · $itemTitle",
+                "Analyzing: $itemTitle",
+                true,
+            )
+        }
+
         latestNotificationSummary = NotificationSummary(
             title = title,
             subtitle = subtitle,
-            percent = pct,
-            indeterminate = false,
+            percent = itemPercent,
+            indeterminate = indeterminate,
+            bigText = bigText,
         )
         TransferNotificationManager.updateProgressNotification(
             context = appCtx,
             title = title,
             contentText = subtitle,
-            progressPercent = pct,
-            indeterminate = false,
+            progressPercent = itemPercent,
+            indeterminate = indeterminate,
+            bigText = bigText,
         )
     }
 
@@ -1633,9 +1715,9 @@ object AndroidDownloadEngine {
         val v = bytes.toDouble()
         return when {
             v < kb -> "$bytes B"
-            v < mb -> String.format("%.1f KB", v / kb)
-            v < gb -> String.format("%.2f MB", v / mb)
-            else -> String.format("%.2f GB", v / gb)
+            v < mb -> String.format(java.util.Locale.US, "%.1f KB", v / kb)
+            v < gb -> String.format(java.util.Locale.US, "%.2f MB", v / mb)
+            else -> String.format(java.util.Locale.US, "%.2f GB", v / gb)
         }
     }
 
@@ -1644,8 +1726,8 @@ object AndroidDownloadEngine {
         val mb = kb * 1024.0
         return when {
             bps < kb -> "${bps.toInt()} B/s"
-            bps < mb -> String.format("%.1f KB/s", bps / kb)
-            else -> String.format("%.2f MB/s", bps / mb)
+            bps < mb -> String.format(java.util.Locale.US, "%.1f KB/s", bps / kb)
+            else -> String.format(java.util.Locale.US, "%.2f MB/s", bps / mb)
         }
     }
 }

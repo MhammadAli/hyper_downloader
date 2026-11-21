@@ -58,6 +58,7 @@ object TransferNotificationManager {
         progressPercent: Int?,
         indeterminate: Boolean,
         cancellable: Boolean = true,
+        bigText: String? = null,
     ): Notification {
         ensureChannels(context)
         val launchIntent = Intent(context, MainActivity::class.java).apply {
@@ -78,6 +79,10 @@ object TransferNotificationManager {
             .setOnlyAlertOnce(true)
             .setContentIntent(contentPi)
             .setProgress(100, (progressPercent ?: 0).coerceIn(0, 100), indeterminate)
+
+        if (!bigText.isNullOrBlank()) {
+            builder.setStyle(Notification.BigTextStyle().bigText(bigText))
+        }
 
         if (cancellable) {
             val cancelIntent = Intent(context, TransferNotificationActionReceiver::class.java).apply {
@@ -107,6 +112,7 @@ object TransferNotificationManager {
         contentText: String,
         progressPercent: Int?,
         indeterminate: Boolean,
+        bigText: String? = null,
     ) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val notification = buildProgressNotification(
@@ -115,6 +121,7 @@ object TransferNotificationManager {
             contentText = contentText,
             progressPercent = progressPercent,
             indeterminate = indeterminate,
+            bigText = bigText,
         )
         runCatching { nm.notify(NOTIFICATION_PROGRESS_ID, notification) }
     }
@@ -211,6 +218,7 @@ class HyperDownloadJobService : JobService() {
             contentText = summary.subtitle,
             progressPercent = summary.percent,
             indeterminate = summary.indeterminate,
+            bigText = summary.bigText,
         )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -254,6 +262,7 @@ class HyperDownloadForegroundService : Service() {
             contentText = summary.subtitle,
             progressPercent = summary.percent,
             indeterminate = summary.indeterminate,
+            bigText = summary.bigText,
         )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

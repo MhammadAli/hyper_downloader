@@ -8,6 +8,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
@@ -28,6 +29,9 @@ data class ExportedMediaResult(
 object AndroidMediaStoreExporter {
     private const val ROOT_FOLDER = "HyperDownload"
     private const val URI_INDEX_FILENAME = "exported_uris.json"
+    private val KNOWN_MEDIA_EXTENSIONS = setOf(
+        "mp4", "m4v", "webm", "mkv", "m4a", "mp3", "opus", "ogg", "flac", "wav", "part", "ytdl",
+    )
     private val indexLock = Any()
 
     fun exportFile(
@@ -222,6 +226,31 @@ object AndroidMediaStoreExporter {
     }
 
     fun revealInFolder(context: Context, pathOrUri: String): Boolean {
+        val relativeFolder = resolveRelativeFolderPath(context, pathOrUri)
+        val docId = "primary:$relativeFolder"
+        val dirUri = DocumentsContract.buildDocumentUri(
+            "com.android.externalstorage.documents",
+            docId,
+        )
+
+        val dirIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(dirUri, DocumentsContract.Document.MIME_TYPE_DIR)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        if (runCatching { context.startActivity(dirIntent); true }.getOrDefault(false)) {
+            return true
+        }
+
+        val resourceFolderIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(dirUri, "resource/folder")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        if (runCatching { context.startActivity(resourceFolderIntent); true }.getOrDefault(false)) {
+            return true
+        }
+
         val downloadsIntent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -229,6 +258,92 @@ object AndroidMediaStoreExporter {
             return true
         }
         return shareFile(context, pathOrUri)
+    }
+
+    private fun resolveRelativeFolderPath(context: Context, pathOrUri: String): String {
+        val defaultFolder = "${Environment.DIRECTORY_DOWNLOADS}/$ROOT_FOLDER"
+        val mappedUri = if (pathOrUri.startsWith("content://")) {
+            Uri.parse(pathOrUri)
+        } else {
+            lookupMapping(context, pathOrUri)?.let { Uri.parse(it) }
+        }
+
+        if (mappedUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val queriedFolder = queryMediaStoreRelativeFolder(context, mappedUri)
+            if (!queriedFolder.isNullOrBlank()) {
+                return queriedFolder
+            }
+        }
+
+        val normalized = pathOrUri.replace('\\', '/').trim()
+        val extRoot = Environment.getExternalStorageDirectory().absolutePath
+            .replace('\\', '/')
+            .trimEnd('/')
+        var relative = when {
+            normalized.startsWith("/storage/emulated/0/") ->
+                normalized.removePrefix("/storage/emulated/0/")
+            extRoot.isNotEmpty() && normalized.startsWith("$extRoot/") ->
+                normalized.removePrefix("$extRoot/")
+            normalized.startsWith("${Environment.DIRECTORY_DOWNLOADS}/") -> normalized
+            else -> ""
+        }.trim('/')
+
+        if (relative.isEmpty()) {
+            return defaultFolder
+        }
+
+        val localFile = File(pathOrUri)
+        if (!localFile.isDirectory) {
+            val lastSegment = relative.substringAfterLast('/', relative)
+            val ext = lastSegment.substringAfterLast('.', "").lowercase()
+            val looksLikeMediaFile = localFile.isFile || ext in KNOWN_MEDIA_EXTENSIONS
+            if (looksLikeMediaFile && relative.contains('/')) {
+                relative = relative.substringBeforeLast('/')
+            }
+        }
+
+        return relative.ifBlank { defaultFolder }
+    }
+
+    private fun queryMediaStoreRelativeFolder(context: Context, uri: Uri): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return null
+        }
+        return runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(
+                    MediaStore.MediaColumns.RELATIVE_PATH,
+                    MediaStore.MediaColumns.DATA,
+                ),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val relIdx = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+                val relPath = if (relIdx >= 0) cursor.getString(relIdx) else null
+                if (!relPath.isNullOrBlank()) {
+                    return@use relPath.replace('\\', '/').trim('/').takeIf { it.isNotEmpty() }
+                }
+                val dataIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                val dataPath = if (dataIdx >= 0) cursor.getString(dataIdx) else null
+                if (!dataPath.isNullOrBlank()) {
+                    val parent = File(dataPath).parent?.replace('\\', '/') ?: return@use null
+                    val extRoot = Environment.getExternalStorageDirectory().absolutePath
+                        .replace('\\', '/')
+                        .trimEnd('/')
+                    return@use when {
+                        parent.startsWith("/storage/emulated/0/") ->
+                            parent.removePrefix("/storage/emulated/0/").trim('/')
+                        extRoot.isNotEmpty() && parent.startsWith("$extRoot/") ->
+                            parent.removePrefix("$extRoot/").trim('/')
+                        else -> null
+                    }?.takeIf { it.isNotEmpty() }
+                }
+                null
+            }
+        }.getOrNull()
     }
 
     fun shareFile(context: Context, pathOrUri: String): Boolean {
