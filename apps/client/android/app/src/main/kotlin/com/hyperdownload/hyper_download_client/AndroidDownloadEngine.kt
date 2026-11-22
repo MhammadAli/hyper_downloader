@@ -6,6 +6,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.annotation.Keep
 import com.chaquo.python.PyObject
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
@@ -17,9 +18,19 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
-fun interface PythonStringCallback {
+@Keep
+interface PythonStringCallback {
+    @Keep
     fun onEvent(json: String)
 }
+
+private inline fun pythonCallback(crossinline handler: (String) -> Unit): PythonStringCallback =
+    object : PythonStringCallback {
+        @Keep
+        override fun onEvent(json: String) {
+            handler(json)
+        }
+    }
 
 data class NotificationSummary(
     val title: String,
@@ -260,7 +271,7 @@ object AndroidDownloadEngine {
 
     private fun launchSingleWorker(appCtx: Context, record: SingleJobRecord) {
         workerExecutor.execute {
-            val cb = PythonStringCallback { eventJson ->
+            val cb = pythonCallback { eventJson ->
                 val obj = runCatching { JSONObject(eventJson) }.getOrNull()
                 if (obj != null) {
                     val phase = obj.optString("phase")
@@ -457,7 +468,7 @@ object AndroidDownloadEngine {
         val initialReady = java.util.concurrent.CountDownLatch(1)
         val startedSync = AtomicBoolean(false)
 
-        val cb = PythonStringCallback { estJson ->
+        val cb = pythonCallback { estJson ->
             if (startedSync.compareAndSet(false, true)) {
                 initialResultRef.set(estJson)
                 initialReady.countDown()
@@ -947,10 +958,10 @@ object AndroidDownloadEngine {
                     put("output_template", outtmpl)
                 }
 
-                val progressCb = PythonStringCallback { evJson ->
-                    val ev = runCatching { JSONObject(evJson) }.getOrNull() ?: return@PythonStringCallback
+                val progressCb = pythonCallback { evJson ->
+                    val ev = runCatching { JSONObject(evJson) }.getOrNull() ?: return@pythonCallback
                     val phase = ev.optString("phase")
-                    if (phase == "Analyzing" || phase == "Canceled" || phase == "Failed") return@PythonStringCallback
+                    if (phase == "Analyzing" || phase == "Canceled" || phase == "Failed") return@pythonCallback
 
                     val isMerging = phase == "Merging"
                     val down = ev.optLong("downloaded_bytes", 0L)

@@ -141,10 +141,10 @@ def _is_estimation_cancelled(estimation_id: str) -> bool:
 def _emit_cb(cb, payload_json: str):
     if cb is None:
         return
-    if callable(cb):
-        cb(payload_json)
-    else:
+    if hasattr(cb, "onEvent"):
         cb.onEvent(payload_json)
+    elif callable(cb):
+        cb(payload_json)
 
 
 def _configure_tls_env() -> str:
