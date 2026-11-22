@@ -1130,5 +1130,29 @@ void main() {
         expect(cubit.state.canCancel, isTrue);
       },
     );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'cancelAnalysis exits loading state and ignores late inspection results',
+      build: () {
+        final completer = Completer<UrlInspectionResult>();
+        when(() => repo.inspectUrl(any())).thenAnswer((_) => completer.future);
+        return MediaDownloadCubit(repository: repo, allowInstagramReels: true)
+          ..initialize();
+      },
+      act: (cubit) async {
+        unawaited(
+          cubit.analyzeUrl('https://www.instagram.com/reel/DTVTvUDj-b1/'),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state.inspectionStatus, InspectionStatus.loading);
+        cubit.cancelAnalysis();
+        expect(cubit.state.inspectionStatus, InspectionStatus.initial);
+        expect(cubit.state.inspection, isNull);
+      },
+      verify: (cubit) {
+        expect(cubit.state.inspectionStatus, InspectionStatus.initial);
+        expect(cubit.state.inspectionError, isNull);
+      },
+    );
   });
 }

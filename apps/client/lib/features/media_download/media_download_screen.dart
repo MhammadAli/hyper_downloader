@@ -199,6 +199,9 @@ class _MediaDownloadScreenState extends State<MediaDownloadScreen> {
                           onAnalyze: () => context
                               .read<MediaDownloadCubit>()
                               .analyzeUrl(_urlController.text),
+                          onCancelAnalysis: () => context
+                              .read<MediaDownloadCubit>()
+                              .cancelAnalysis(),
                         ),
                       ),
                       AnimatedSize(
@@ -335,6 +338,7 @@ class _UrlInputCard extends StatelessWidget {
   final VoidCallback onClear;
   final VoidCallback onPaste;
   final VoidCallback onAnalyze;
+  final VoidCallback onCancelAnalysis;
 
   const _UrlInputCard({
     required this.controller,
@@ -344,11 +348,18 @@ class _UrlInputCard extends StatelessWidget {
     required this.onClear,
     required this.onPaste,
     required this.onAnalyze,
+    required this.onCancelAnalysis,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final isInstagram = MediaDownloadCubit.isInstagramUrl(controller.text);
+    final analysisStatusText = isInstagram
+        ? 'Connecting to Instagram and checking available formats...'
+        : 'Analyzing link and discovering available qualities...';
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -410,22 +421,59 @@ class _UrlInputCard extends StatelessWidget {
               ],
             );
 
-            if (constraints.maxWidth < 560) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  textField,
-                  const SizedBox(height: 12),
-                  Align(alignment: Alignment.centerRight, child: actions),
-                ],
-              );
-            }
+            final inputRow = constraints.maxWidth < 560
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      textField,
+                      const SizedBox(height: 12),
+                      Align(alignment: Alignment.centerRight, child: actions),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Expanded(child: textField),
+                      const SizedBox(width: 12),
+                      actions,
+                    ],
+                  );
 
-            return Row(
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(child: textField),
-                const SizedBox(width: 12),
-                actions,
+                inputRow,
+                if (isAnalyzing) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: scheme.secondary,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          analysisStatusText,
+                          key: const Key('analysis_status_text'),
+                          style: textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        key: const Key('cancel_analysis_button'),
+                        onPressed: onCancelAnalysis,
+                        icon: const Icon(Icons.close_rounded, size: 16),
+                        label: const Text('Cancel'),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             );
           },

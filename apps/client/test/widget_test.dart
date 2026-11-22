@@ -48,6 +48,7 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
   bool shouldFailInspection = false;
   bool returnMissingAudio = false;
   bool returnProgressiveInstagramReel = false;
+  Completer<UrlInspectionResult>? inspectCompleter;
   String sampleTitle = 'Multi-Audio Test Presentation';
   String samplePlaylistTitle = 'Blender HQ Tutorials';
   String samplePlaylistFirstItemTitle = 'Episode One';
@@ -60,6 +61,9 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
 
   @override
   Future<UrlInspectionResult> inspectUrl(String url) async {
+    if (inspectCompleter != null) {
+      return inspectCompleter!.future;
+    }
     if (shouldFailInspection) {
       throw Exception('Simulated extraction failure');
     }
@@ -1145,6 +1149,56 @@ void main() {
               .onPressed,
           isNotNull,
         );
+      },
+    );
+
+    testWidgets(
+      'displays informative Instagram analysis status and supports Cancel while analyzing',
+      (WidgetTester tester) async {
+        final completer = Completer<UrlInspectionResult>();
+        fakeRepo.inspectCompleter = completer;
+
+        await tester.pumpWidget(
+          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
+        );
+        await tester.pump();
+
+        await tester.enterText(
+          find.byKey(const Key('url_input_field')),
+          'https://www.instagram.com/reel/DTVTvUDj-b1/',
+        );
+        await tester.tap(find.byKey(const Key('analyze_url_button')));
+        await tester.pump(const Duration(milliseconds: 100));
+
+        expect(find.byKey(const Key('analysis_status_text')), findsOneWidget);
+        expect(
+          find.text(
+            'Connecting to Instagram and checking available formats...',
+          ),
+          findsOneWidget,
+        );
+        expect(find.byKey(const Key('cancel_analysis_button')), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('cancel_analysis_button')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('analysis_status_text')), findsNothing);
+        expect(find.byKey(const Key('cancel_analysis_button')), findsNothing);
+
+        // Late-arriving metadata after cancellation must remain ignored.
+        fakeRepo.returnProgressiveInstagramReel = true;
+        fakeRepo.inspectCompleter = null;
+        final lateMedia = await fakeRepo.inspectMedia(
+          'https://www.instagram.com/reel/DTVTvUDj-b1/',
+        );
+        completer.complete(
+          UrlInspectionResult(
+            kind: InspectionTargetKind.singleVideo,
+            video: lateMedia,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Video by rahulmfg'), findsNothing);
       },
     );
   });

@@ -18,6 +18,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
   StreamSubscription<String>? _sharedUrlSubscription;
   final List<PlaylistProgressEvent> _pendingPlaylistEvents = [];
   int _sizeEstimateRequestSeq = 0;
+  int _inspectionRequestSeq = 0;
   bool _pauseRequested = false;
 
   MediaDownloadCubit({
@@ -152,6 +153,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
       return;
     }
 
+    final seq = ++_inspectionRequestSeq;
     emit(
       state.copyWith(
         urlInput: targetUrl,
@@ -164,6 +166,9 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
 
     try {
       final inspected = await _repository.inspectUrl(targetUrl);
+      if (isClosed || seq != _inspectionRequestSeq) {
+        return;
+      }
       if (inspected.kind == InspectionTargetKind.playlist &&
           inspected.playlist != null) {
         final playlist = inspected.playlist!;
@@ -175,8 +180,14 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
         } catch (_) {
           // Saved manifest loading is best-effort only.
         }
+        if (isClosed || seq != _inspectionRequestSeq) {
+          return;
+        }
         _pendingPlaylistEvents.clear();
         await _cancelActiveSizeEstimation();
+        if (isClosed || seq != _inspectionRequestSeq) {
+          return;
+        }
         emit(
           state.copyWith(
             inspectionStatus: InspectionStatus.loaded,
@@ -224,6 +235,9 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
       }
 
       await _cancelActiveSizeEstimation();
+      if (isClosed || seq != _inspectionRequestSeq) {
+        return;
+      }
       final defaultVideoId = video.videoOptions.isNotEmpty
           ? video.videoOptions.first.videoFormatId
           : null;
@@ -258,6 +272,9 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
         ),
       );
     } catch (err) {
+      if (isClosed || seq != _inspectionRequestSeq) {
+        return;
+      }
       emit(
         state.copyWith(
           inspectionStatus: InspectionStatus.failure,
@@ -265,6 +282,22 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
         ),
       );
     }
+  }
+
+  void cancelAnalysis() {
+    if (state.inspectionStatus != InspectionStatus.loading) {
+      return;
+    }
+    _inspectionRequestSeq++;
+    emit(
+      state.copyWith(
+        inspectionStatus:
+            (state.inspection != null || state.playlistInspection != null)
+            ? InspectionStatus.loaded
+            : InspectionStatus.initial,
+        inspectionError: null,
+      ),
+    );
   }
 
   void setMediaMode(DownloadMediaMode mode) {
