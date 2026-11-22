@@ -361,9 +361,12 @@ class _UrlInputCard extends StatelessWidget {
               onChanged: onUrlChanged,
               onSubmitted: (_) => onAnalyze(),
               decoration: InputDecoration(
-                labelText: 'Paste video, Shorts, or playlist link',
-                hintText:
-                    'https://www.youtube.com/watch?v=... or playlist?list=...',
+                labelText: Platform.isAndroid
+                    ? 'Paste video, Shorts, or playlist link'
+                    : 'Paste YouTube or Instagram Reel link',
+                hintText: Platform.isAndroid
+                    ? 'https://www.youtube.com/watch?v=... or playlist?list=...'
+                    : 'YouTube video, Shorts, playlist, or Instagram Reel URL',
                 prefixIcon: Icon(Icons.link_rounded, color: scheme.secondary),
                 suffixIcon: hasUrlText && !isAnalyzing
                     ? IconButton(
@@ -642,34 +645,45 @@ class _QualitySelectionCard extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: SegmentedButton<DownloadMediaMode>(
-                    key: const Key('media_mode_toggle'),
-                    style: const ButtonStyle(
-                      visualDensity: VisualDensity.compact,
+                if (state.audioOptions.isNotEmpty)
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: SegmentedButton<DownloadMediaMode>(
+                      key: const Key('media_mode_toggle'),
+                      style: const ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      segments: const [
+                        ButtonSegment<DownloadMediaMode>(
+                          value: DownloadMediaMode.videoWithSound,
+                          icon: Icon(Icons.movie_creation_outlined, size: 18),
+                          label: Text('Video with Sound'),
+                        ),
+                        ButtonSegment<DownloadMediaMode>(
+                          value: DownloadMediaMode.audioOnly,
+                          icon: Icon(Icons.audiotrack_outlined, size: 18),
+                          label: Text('Audio Only'),
+                        ),
+                      ],
+                      selected: {state.mediaMode},
+                      onSelectionChanged: (selected) {
+                        if (selected.isNotEmpty) {
+                          cubit.setMediaMode(selected.first);
+                        }
+                      },
                     ),
-                    segments: const [
-                      ButtonSegment<DownloadMediaMode>(
-                        value: DownloadMediaMode.videoWithSound,
-                        icon: Icon(Icons.movie_creation_outlined, size: 18),
-                        label: Text('Video with Sound'),
-                      ),
-                      ButtonSegment<DownloadMediaMode>(
-                        value: DownloadMediaMode.audioOnly,
-                        icon: Icon(Icons.audiotrack_outlined, size: 18),
-                        label: Text('Audio Only'),
-                      ),
-                    ],
-                    selected: {state.mediaMode},
-                    onSelectionChanged: (selected) {
-                      if (selected.isNotEmpty) {
-                        cubit.setMediaMode(selected.first);
-                      }
-                    },
+                  )
+                else
+                  Chip(
+                    key: const Key('video_only_mode_badge'),
+                    avatar: Icon(
+                      Icons.movie_creation_outlined,
+                      size: 18,
+                      color: scheme.secondary,
+                    ),
+                    label: const Text('Video with Sound'),
                   ),
-                ),
               ],
             ),
             if (state.originalAudio != null) ...[
@@ -1074,9 +1088,10 @@ class _DownloadControlsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cubit = context.read<MediaDownloadCubit>();
     final progress = state.latestProgress;
+    final isPreparingInitial = state.isPreparingDownload;
     final phase =
         progress?.phase ??
-        (state.isStartingDownload ? DownloadPhase.analyzing : null);
+        (isPreparingInitial ? DownloadPhase.analyzing : null);
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
@@ -1098,6 +1113,17 @@ class _DownloadControlsCard extends StatelessWidget {
         phase == DownloadPhase.completed &&
         outputPath != null &&
         outputPath.isNotEmpty;
+    final phaseLabel = phase == null
+        ? null
+        : _resolvePhaseLabel(
+            phase,
+            isPaused: state.isPaused,
+            message: progress?.message,
+            downloadedBytes: progress?.downloadedBytes,
+          );
+    final statusMessage =
+        progress?.message ??
+        (isPreparingInitial ? 'Preparing download...' : null);
 
     return Card(
       key: const Key('download_controls_card'),
@@ -1115,15 +1141,14 @@ class _DownloadControlsCard extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                if (phase != null)
+                if (phase != null && phaseLabel != null)
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 200),
                     child: _PhaseBadge(
-                      key: ValueKey('${phase.name}_${state.isPaused}'),
-                      label: _resolvePhaseLabel(
-                        phase,
-                        isPaused: state.isPaused,
+                      key: ValueKey(
+                        '${phase.name}_${state.isPaused}_$phaseLabel',
                       ),
+                      label: phaseLabel,
                       phase: phase,
                       isPaused: state.isPaused,
                     ),
@@ -1167,7 +1192,7 @@ class _DownloadControlsCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (progress != null || state.isStartingDownload) ...[
+            if (progress != null || isPreparingInitial) ...[
               const SizedBox(height: 16),
               TweenAnimationBuilder<double>(
                 tween: Tween<double>(begin: 0.0, end: fraction ?? 0.0),
@@ -1230,10 +1255,10 @@ class _DownloadControlsCard extends StatelessWidget {
                   ),
                 ],
               ),
-              if (progress?.message != null && !isCompleted) ...[
+              if (statusMessage != null && !isCompleted) ...[
                 const SizedBox(height: 8),
                 Text(
-                  progress!.message!,
+                  statusMessage,
                   style: textTheme.bodySmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),
@@ -1486,16 +1511,37 @@ String _formatEta(BigInt? etaSeconds) {
   return _formatDuration(etaSeconds.toInt());
 }
 
-String _resolvePhaseLabel(DownloadPhase phase, {required bool isPaused}) {
+String _resolvePhaseLabel(
+  DownloadPhase phase, {
+  required bool isPaused,
+  String? message,
+  BigInt? downloadedBytes,
+}) {
   if (isPaused && phase == DownloadPhase.canceled) {
     return 'Paused';
   }
+  if (phase == DownloadPhase.downloading &&
+      downloadedBytes != null &&
+      downloadedBytes == BigInt.zero) {
+    return 'Connecting';
+  }
   return switch (phase) {
-    DownloadPhase.analyzing => 'Analyzing',
+    DownloadPhase.analyzing => _resolvePreparingLabel(message),
     DownloadPhase.downloading => 'Downloading',
     DownloadPhase.merging => 'Merging',
     DownloadPhase.completed => 'Completed',
     DownloadPhase.canceled => 'Canceled',
     DownloadPhase.failed => 'Failed',
   };
+}
+
+String _resolvePreparingLabel(String? message) {
+  final lower = (message ?? '').toLowerCase();
+  if (lower.contains('connecting') || lower.contains('retrying')) {
+    return 'Connecting';
+  }
+  if (lower.contains('resolving')) {
+    return 'Resolving';
+  }
+  return 'Preparing';
 }

@@ -45,6 +45,12 @@ pub fn is_playlist_url(raw_url: &str) -> bool {
     if !matches!(parsed.scheme(), "http" | "https") {
         return false;
     }
+    if parsed
+        .host_str()
+        .is_some_and(crate::platform::is_instagram_host)
+    {
+        return false;
+    }
 
     let list_param = parsed
         .query_pairs()
@@ -781,7 +787,7 @@ async fn run_yt_dlp_download_once(
                 ParsedYtDlpLine::OutputPathDetected(path) => {
                     detected_output_path = Some(path);
                 }
-                ParsedYtDlpLine::Other => {}
+                ParsedYtDlpLine::StageStatus(_) | ParsedYtDlpLine::Other => {}
             }
         }
     }
@@ -2292,6 +2298,9 @@ mod tests {
         ));
         assert!(!is_playlist_url(
             "https://www.youtube.com/watch?v=aqz-KE-bpKQ&list=RDaqz-KE-bpKQ"
+        ));
+        assert!(!is_playlist_url(
+            "https://www.instagram.com/reel/DTVTvUDj-b1/?list=PL123456"
         ));
         assert_eq!(
             normalize_playlist_url(

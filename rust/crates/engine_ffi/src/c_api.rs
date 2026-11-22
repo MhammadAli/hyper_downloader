@@ -3,12 +3,13 @@
 //! the Android Chaquopy Python worker via `ctypes.CDLL("libengine_ffi.so")`.
 
 use crate::models::{MediaInspection, PlaylistInspection, PlaylistMediaMode, PlaylistQualityCap};
+use crate::platform::{classify_and_normalize_url, MediaPlatform};
 use crate::playlist::{
     build_playlist_size_estimate, is_playlist_url, normalize_playlist_url,
     parse_yt_dlp_playlist_json,
 };
 use crate::selection::select_playlist_item_option;
-use crate::yt_dlp::{parse_yt_dlp_inspection_json, validate_media_url};
+use crate::yt_dlp::parse_yt_dlp_inspection_json;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
@@ -209,7 +210,11 @@ pub unsafe extern "C" fn hyperdl_build_playlist_size_estimate_json(
 pub unsafe extern "C" fn hyperdl_classify_url_json(raw_url: *const c_char) -> *mut c_char {
     let result = (|| {
         let raw = cstr_to_str(raw_url, "raw_url")?;
-        let validated = validate_media_url(raw).map_err(|e| e.to_string())?;
+        let classified = classify_and_normalize_url(raw).map_err(|e| e.to_string())?;
+        if classified.platform == MediaPlatform::InstagramReel {
+            return Err("Instagram Reels are currently supported on Windows only.".to_string());
+        }
+        let validated = classified.normalized_url;
         let playlist = is_playlist_url(&validated);
         let normalized_url = if playlist {
             normalize_playlist_url(&validated).map_err(|e| e.to_string())?
@@ -450,5 +455,16 @@ mod tests {
         assert_eq!(est_parsed.ok.status, PlaylistSizeStatus::Exact);
         assert_eq!(est_parsed.ok.known_total_bytes, 10_485_760);
         assert_eq!(est_parsed.ok.unavailable_count, 1);
+    }
+
+    #[test]
+    fn c_api_rejects_instagram_reel_for_android() {
+        let ig = CString::new("https://www.instagram.com/reel/DTVTvUDj-b1/").unwrap();
+        let out = unsafe { take_and_free(hyperdl_classify_url_json(ig.as_ptr())) };
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let err = parsed["error"]
+            .as_str()
+            .expect("error field must be present");
+        assert!(err.contains("Windows only"));
     }
 }

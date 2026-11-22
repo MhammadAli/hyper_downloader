@@ -66,6 +66,17 @@ pub fn build_quality_options(
     candidates: &[RawFormatCandidate],
     video_language: Option<&str>,
 ) -> SynthesizedMediaOptions {
+    build_quality_options_for_platform(candidates, video_language, false)
+}
+
+/// Platform-aware variant of [`build_quality_options`] that avoids YouTube-specific
+/// original/dubbing heuristics for single-track Instagram Reels while preserving
+/// strict audio-required safety and honest option synthesis.
+pub fn build_quality_options_for_platform(
+    candidates: &[RawFormatCandidate],
+    video_language: Option<&str>,
+    is_instagram: bool,
+) -> SynthesizedMediaOptions {
     let audio_candidates: Vec<&RawFormatCandidate> = candidates
         .iter()
         .filter(|c| c.format.stream_kind == StreamKind::AudioOnly)
@@ -81,27 +92,47 @@ pub fn build_quality_options(
         .filter(|c| c.format.stream_kind == StreamKind::VideoOnly)
         .collect();
 
-    let signals = analyze_audio_environment(&audio_candidates, video_language);
-    let selected_audio = select_preferred_audio_candidate(&audio_candidates, &signals, true);
-
-    let (original_audio, winning_audio_meta) = match selected_audio {
-        Some(winner) => {
-            let meta = build_audio_metadata(winner, &signals);
-            (Some(meta.clone()), Some(meta))
-        }
-        None => (None, None),
+    let (signals, selected_audio, initial_original_audio, winning_audio_meta) = if is_instagram {
+        let signals = AudioEnvironmentSignals::default();
+        let selected = select_preferred_audio_candidate(&audio_candidates, &signals, true);
+        let meta = if selected.is_some() {
+            Some(build_instagram_audio_metadata(selected))
+        } else {
+            None
+        };
+        (signals, selected, meta.clone(), meta)
+    } else {
+        let signals = analyze_audio_environment(&audio_candidates, video_language);
+        let selected = select_preferred_audio_candidate(&audio_candidates, &signals, true);
+        let (orig, winning) = match selected {
+            Some(winner) => {
+                let meta = build_audio_metadata(winner, &signals);
+                (Some(meta.clone()), Some(meta))
+            }
+            None => (None, None),
+        };
+        (signals, selected, orig, winning)
     };
+    let _ = selected_audio;
 
     let audio_options =
         build_audio_only_options(&audio_candidates, &signals, winning_audio_meta.as_ref());
 
-    let video_options = build_video_with_sound_options(
+    let video_options = build_video_with_sound_options_inner(
         &muxed_candidates,
         &video_only_candidates,
         &audio_candidates,
         &signals,
         winning_audio_meta.as_ref(),
+        is_instagram,
     );
+
+    let original_audio =
+        if is_instagram && initial_original_audio.is_none() && !video_options.is_empty() {
+            Some(build_instagram_audio_metadata(None))
+        } else {
+            initial_original_audio
+        };
 
     SynthesizedMediaOptions {
         original_audio,
@@ -110,7 +141,7 @@ pub fn build_quality_options(
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct AudioEnvironmentSignals {
     normalized_video_lang: Option<String>,
     has_explicit_multi_audio_markers: bool,
@@ -615,23 +646,50 @@ fn format_audio_quality_label(cand: &RawFormatCandidate) -> String {
     }
 }
 
-fn build_video_with_sound_options(
+fn build_instagram_audio_metadata(cand: Option<&RawFormatCandidate>) -> AudioTrackMetadata {
+    let language = cand
+        .and_then(|c| c.language.clone())
+        .filter(|s| !s.is_empty());
+    AudioTrackMetadata {
+        language,
+        language_display_name: None,
+        is_original: None,
+        is_default: None,
+        is_auto_dub: None,
+        selection_confidence: AudioSelectionConfidence::SingleOrUnmarked,
+        status_note: "Audio included automatically".to_string(),
+    }
+}
+
+fn effective_quality_height(cand: &RawFormatCandidate) -> Option<u32> {
+    match (cand.format.width, cand.format.height) {
+        (Some(w), Some(h)) if w > 0 && h > 0 => Some(w.min(h)),
+        (_, Some(h)) if h > 0 => Some(h),
+        _ => None,
+    }
+}
+
+fn build_video_with_sound_options_inner(
     muxed_candidates: &[&RawFormatCandidate],
     video_only_candidates: &[&RawFormatCandidate],
     audio_candidates: &[&RawFormatCandidate],
     signals: &AudioEnvironmentSignals,
     winning_audio_meta: Option<&AudioTrackMetadata>,
+    is_instagram: bool,
 ) -> Vec<VideoQualityOption> {
     let mut grouped_heights: BTreeMap<u32, (Vec<&RawFormatCandidate>, Vec<&RawFormatCandidate>)> =
         BTreeMap::new();
+    let mut unknown_res_muxed: Vec<&RawFormatCandidate> = Vec::new();
 
     for cand in muxed_candidates {
-        if let Some(h) = cand.format.height {
+        if let Some(h) = effective_quality_height(cand) {
             grouped_heights.entry(h).or_default().0.push(*cand);
+        } else {
+            unknown_res_muxed.push(*cand);
         }
     }
     for cand in video_only_candidates {
-        if let Some(h) = cand.format.height {
+        if let Some(h) = effective_quality_height(cand) {
             grouped_heights.entry(h).or_default().1.push(*cand);
         }
     }
@@ -664,10 +722,12 @@ fn build_video_with_sound_options(
                 {
                     build_paired_video_option(height, vid, pair_audio, winning_audio_meta)
                 } else {
-                    build_combined_video_option(height, muxed, winning_audio_meta)
+                    build_combined_video_option(height, muxed, winning_audio_meta, is_instagram)
                 }
             }
-            (Some(muxed), None) => build_combined_video_option(height, muxed, winning_audio_meta),
+            (Some(muxed), None) => {
+                build_combined_video_option(height, muxed, winning_audio_meta, is_instagram)
+            }
             (None, Some((vid, pair_audio))) => {
                 build_paired_video_option(height, vid, pair_audio, winning_audio_meta)
             }
@@ -676,6 +736,18 @@ fn build_video_with_sound_options(
         };
 
         results.push(chosen);
+    }
+
+    if results.is_empty() && !unknown_res_muxed.is_empty() {
+        if let Some(best_muxed) =
+            select_best_muxed_for_height(&unknown_res_muxed, signals, winning_audio_meta)
+        {
+            results.push(build_unknown_res_combined_video_option(
+                best_muxed,
+                winning_audio_meta,
+                is_instagram,
+            ));
+        }
     }
 
     results
@@ -805,16 +877,51 @@ fn build_combined_video_option(
     height: u32,
     muxed: &RawFormatCandidate,
     winning_audio_meta: Option<&AudioTrackMetadata>,
+    is_instagram: bool,
 ) -> VideoQualityOption {
-    let audio_meta = winning_audio_meta
-        .cloned()
-        .unwrap_or_else(|| build_muxed_fallback_audio_metadata(muxed));
+    let audio_meta = winning_audio_meta.cloned().unwrap_or_else(|| {
+        if is_instagram {
+            build_instagram_audio_metadata(Some(muxed))
+        } else {
+            build_muxed_fallback_audio_metadata(muxed)
+        }
+    });
     let display_size =
         format_display_size(muxed.format.file_size_bytes, muxed.format.size_accuracy);
 
     VideoQualityOption {
         resolution: format_resolution_label(height),
         height: Some(height),
+        fps: muxed.format.fps,
+        container: muxed.format.container.to_ascii_lowercase(),
+        display_size,
+        file_size_bytes: muxed.format.file_size_bytes,
+        size_accuracy: muxed.format.size_accuracy,
+        video_format_id: muxed.format.format_id.clone(),
+        selected_audio_format_id: None,
+        audio_language: Some(audio_meta),
+        format_selection_strategy: FormatSelectionStrategy::CombinedAudioVideo,
+    }
+}
+
+fn build_unknown_res_combined_video_option(
+    muxed: &RawFormatCandidate,
+    winning_audio_meta: Option<&AudioTrackMetadata>,
+    is_instagram: bool,
+) -> VideoQualityOption {
+    let audio_meta = winning_audio_meta.cloned().unwrap_or_else(|| {
+        if is_instagram {
+            build_instagram_audio_metadata(Some(muxed))
+        } else {
+            build_muxed_fallback_audio_metadata(muxed)
+        }
+    });
+    let display_size =
+        format_display_size(muxed.format.file_size_bytes, muxed.format.size_accuracy);
+
+    VideoQualityOption {
+        resolution: "Standard".to_string(),
+        height: None,
         fps: muxed.format.fps,
         container: muxed.format.container.to_ascii_lowercase(),
         display_size,

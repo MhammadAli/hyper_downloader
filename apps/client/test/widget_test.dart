@@ -47,6 +47,7 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
   String? lastCanceledSizeEstimationId;
   bool shouldFailInspection = false;
   bool returnMissingAudio = false;
+  bool returnProgressiveInstagramReel = false;
   String sampleTitle = 'Multi-Audio Test Presentation';
   String samplePlaylistTitle = 'Blender HQ Tutorials';
   String samplePlaylistFirstItemTitle = 'Episode One';
@@ -130,6 +131,37 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
         providerName: 'Youtube',
         originalAudio: null,
         videoOptions: const [],
+        audioOptions: const [],
+        formats: const [],
+      );
+    }
+
+    if (returnProgressiveInstagramReel) {
+      const igAudio = AudioTrackMetadata(
+        selectionConfidence: AudioSelectionConfidence.singleOrUnmarked,
+        statusNote: 'Audio included automatically',
+      );
+      return MediaInspection(
+        id: 'DTVTvUDj-b1',
+        title: 'Video by rahulmfg',
+        uploader: 'Rahul',
+        durationSeconds: null,
+        thumbnailUrl: null,
+        webpageUrl: 'https://www.instagram.com/reel/DTVTvUDj-b1/',
+        providerName: 'Instagram',
+        originalAudio: igAudio,
+        videoOptions: const [
+          VideoQualityOption(
+            resolution: '1080p',
+            height: 1080,
+            container: 'mp4',
+            displaySize: 'Unknown size',
+            sizeAccuracy: FileSizeAccuracy.unknown,
+            videoFormatId: '1',
+            audioLanguage: igAudio,
+            formatSelectionStrategy: FormatSelectionStrategy.combinedAudioVideo,
+          ),
+        ],
         audioOptions: const [],
         formats: const [],
       );
@@ -966,6 +998,153 @@ void main() {
         } finally {
           await tempDir.delete(recursive: true);
         }
+      },
+    );
+
+    testWidgets(
+      'displays Instagram badge cleanly and hides Audio Only when audioOptions is empty',
+      (WidgetTester tester) async {
+        fakeRepo.returnProgressiveInstagramReel = true;
+        await tester.pumpWidget(
+          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
+        );
+        await tester.pump();
+
+        await tester.enterText(
+          find.byKey(const Key('url_input_field')),
+          'https://www.instagram.com/reel/DTVTvUDj-b1/',
+        );
+        await tester.tap(find.byKey(const Key('analyze_url_button')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Instagram'), findsOneWidget);
+        expect(find.text('Video by rahulmfg'), findsOneWidget);
+        expect(find.text('1080p'), findsOneWidget);
+        expect(find.text('Audio included automatically'), findsOneWidget);
+        expect(find.byKey(const Key('media_mode_toggle')), findsNothing);
+        expect(find.text('Audio Only'), findsNothing);
+        expect(find.byKey(const Key('video_only_mode_badge')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'displays Preparing/Connecting/Resolving instead of Analyzing after pressing Download and disables Pause until first byte',
+      (WidgetTester tester) async {
+        fakeRepo.returnProgressiveInstagramReel = true;
+        await tester.pumpWidget(
+          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
+        );
+        await tester.pump();
+
+        await tester.enterText(
+          find.byKey(const Key('url_input_field')),
+          'https://www.instagram.com/reel/DTVTvUDj-b1/',
+        );
+        await tester.tap(find.byKey(const Key('analyze_url_button')));
+        await tester.pumpAndSettle();
+
+        await tester.ensureVisible(
+          find.byKey(const Key('start_download_button')),
+        );
+        await tester.tap(find.byKey(const Key('start_download_button')));
+        await tester.pump();
+
+        expect(find.text('Preparing'), findsOneWidget);
+        expect(find.text('Analyzing'), findsNothing);
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.byKey(const Key('pause_download_button')),
+              )
+              .onPressed,
+          isNull,
+        );
+        expect(
+          tester
+              .widget<OutlinedButton>(
+                find.byKey(const Key('cancel_download_button')),
+              )
+              .onPressed,
+          isNotNull,
+        );
+
+        fakeRepo.progressController.add(
+          DownloadProgressEvent(
+            jobId: 'fake-job-1',
+            phase: DownloadPhase.analyzing,
+            downloadedBytes: BigInt.zero,
+            isTotalEstimated: false,
+            message: 'Connecting to Instagram...',
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 250));
+        expect(find.text('Connecting'), findsOneWidget);
+        expect(find.text('Analyzing'), findsNothing);
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.byKey(const Key('pause_download_button')),
+              )
+              .onPressed,
+          isNull,
+        );
+
+        fakeRepo.progressController.add(
+          DownloadProgressEvent(
+            jobId: 'fake-job-1',
+            phase: DownloadPhase.analyzing,
+            downloadedBytes: BigInt.zero,
+            isTotalEstimated: false,
+            message: 'Resolving media...',
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 250));
+        expect(find.text('Resolving'), findsOneWidget);
+        expect(find.text('Analyzing'), findsNothing);
+
+        // Even if an upstream 0-byte Downloading event arrives, UI stays Connecting & Pause disabled.
+        fakeRepo.progressController.add(
+          DownloadProgressEvent(
+            jobId: 'fake-job-1',
+            phase: DownloadPhase.downloading,
+            downloadedBytes: BigInt.zero,
+            isTotalEstimated: false,
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 250));
+        expect(find.text('Connecting'), findsOneWidget);
+        expect(find.text('Downloading'), findsNothing);
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.byKey(const Key('pause_download_button')),
+              )
+              .onPressed,
+          isNull,
+        );
+
+        // Once real media bytes arrive, UI transitions to Downloading and Pause becomes enabled.
+        fakeRepo.progressController.add(
+          DownloadProgressEvent(
+            jobId: 'fake-job-1',
+            phase: DownloadPhase.downloading,
+            downloadedBytes: BigInt.from(131072),
+            totalBytes: BigInt.from(1514829),
+            isTotalEstimated: false,
+            speedBytesPerSec: 262144.0,
+            etaSeconds: BigInt.from(5),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Downloading'), findsOneWidget);
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.byKey(const Key('pause_download_button')),
+              )
+              .onPressed,
+          isNotNull,
+        );
       },
     );
   });

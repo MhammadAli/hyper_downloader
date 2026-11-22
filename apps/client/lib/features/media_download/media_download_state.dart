@@ -173,6 +173,9 @@ class MediaDownloadState extends Equatable {
 
   DownloadPhase? get currentPhase => latestProgress?.phase;
 
+  bool get isPreparingDownload =>
+      isStartingDownload || (activeJobId != null && latestProgress == null);
+
   bool get isDownloadActive {
     if (isStartingDownload) return true;
     final phase = currentPhase;
@@ -190,18 +193,18 @@ class MediaDownloadState extends Equatable {
   }
 
   bool get canPause {
-    if (activeJobId == null) return false;
-    final phase = currentPhase;
-    return isStartingDownload ||
-        phase == DownloadPhase.analyzing ||
-        phase == DownloadPhase.downloading;
+    if (activeJobId == null || isStartingDownload) return false;
+    final progress = latestProgress;
+    return progress != null &&
+        progress.phase == DownloadPhase.downloading &&
+        progress.downloadedBytes > BigInt.zero;
   }
 
   bool get canCancel {
     if (activeJobId == null) return false;
+    if (isPreparingDownload) return true;
     final phase = currentPhase;
-    return isStartingDownload ||
-        phase == DownloadPhase.analyzing ||
+    return phase == DownloadPhase.analyzing ||
         phase == DownloadPhase.downloading ||
         phase == DownloadPhase.merging;
   }

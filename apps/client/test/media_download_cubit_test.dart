@@ -991,5 +991,144 @@ void main() {
         );
       },
     );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'inspects Instagram Reel on Windows and ignores Audio Only when audioOptions is empty',
+      build: () {
+        const audioMeta = AudioTrackMetadata(
+          selectionConfidence: AudioSelectionConfidence.singleOrUnmarked,
+          statusNote: 'Audio included automatically',
+        );
+        final igReel = MediaInspection(
+          id: 'PROG_IG_1',
+          title: 'Video by creator',
+          uploader: 'Creator',
+          webpageUrl: 'https://www.instagram.com/reel/PROG_IG_1/',
+          providerName: 'Instagram',
+          originalAudio: audioMeta,
+          videoOptions: [
+            VideoQualityOption(
+              resolution: 'Standard',
+              container: 'mp4',
+              displaySize: 'Unknown size',
+              sizeAccuracy: FileSizeAccuracy.unknown,
+              videoFormatId: '1',
+              audioLanguage: audioMeta,
+              formatSelectionStrategy:
+                  FormatSelectionStrategy.combinedAudioVideo,
+            ),
+          ],
+          audioOptions: const [],
+          formats: const [],
+        );
+        when(() => repo.inspectUrl(any())).thenAnswer(
+          (_) async => UrlInspectionResult(
+            kind: InspectionTargetKind.singleVideo,
+            video: igReel,
+          ),
+        );
+        when(
+          () => repo.startDownload(any()),
+        ).thenAnswer((_) async => 'ig-job-1');
+
+        return MediaDownloadCubit(repository: repo, allowInstagramReels: true);
+      },
+      act: (cubit) async {
+        cubit.initialize();
+        await cubit.analyzeUrl('https://www.instagram.com/reel/PROG_IG_1/');
+        cubit.setMediaMode(DownloadMediaMode.audioOnly);
+        await cubit.startDownload();
+      },
+      verify: (cubit) {
+        expect(cubit.state.inspection?.providerName, 'Instagram');
+        expect(cubit.state.mediaMode, DownloadMediaMode.videoWithSound);
+        final captured =
+            verify(() => repo.startDownload(captureAny())).captured.single
+                as StartDownloadRequest;
+        expect(captured.selection.kind, DownloadSelectionKind.single);
+        expect(captured.selection.formatId, '1');
+      },
+    );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'blocks Instagram Reel URLs when allowInstagramReels is false (Android guard)',
+      build: () =>
+          MediaDownloadCubit(repository: repo, allowInstagramReels: false),
+      act: (cubit) async {
+        cubit.initialize();
+        await cubit.analyzeUrl('https://www.instagram.com/reel/DTVTvUDj-b1/');
+      },
+      verify: (cubit) {
+        verifyNever(() => repo.inspectUrl(any()));
+        expect(cubit.state.inspectionStatus, InspectionStatus.failure);
+        expect(
+          cubit.state.inspectionError,
+          contains('supported on Windows only'),
+        );
+      },
+    );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'disables pause and keeps cancel enabled before first byte transfers',
+      build: () {
+        when(() => repo.inspectUrl(any())).thenAnswer(
+          (_) async => UrlInspectionResult(
+            kind: InspectionTargetKind.singleVideo,
+            video: _sampleInspection(),
+          ),
+        );
+        when(
+          () => repo.startDownload(any()),
+        ).thenAnswer((_) async => 'job-ig-1');
+        return MediaDownloadCubit(repository: repo, allowInstagramReels: true)
+          ..initialize();
+      },
+      act: (cubit) async {
+        await cubit.analyzeUrl('https://www.instagram.com/reel/DTVTvUDj-b1/');
+        await cubit.startDownload();
+        expect(cubit.state.canPause, isFalse);
+        expect(cubit.state.canCancel, isTrue);
+
+        progressController.add(
+          DownloadProgressEvent(
+            jobId: 'job-ig-1',
+            phase: DownloadPhase.analyzing,
+            downloadedBytes: BigInt.zero,
+            isTotalEstimated: false,
+            message: 'Connecting to Instagram...',
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state.canPause, isFalse);
+        expect(cubit.state.canCancel, isTrue);
+
+        progressController.add(
+          DownloadProgressEvent(
+            jobId: 'job-ig-1',
+            phase: DownloadPhase.downloading,
+            downloadedBytes: BigInt.zero,
+            isTotalEstimated: false,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state.canPause, isFalse);
+        expect(cubit.state.canCancel, isTrue);
+
+        progressController.add(
+          DownloadProgressEvent(
+            jobId: 'job-ig-1',
+            phase: DownloadPhase.downloading,
+            downloadedBytes: BigInt.from(32768),
+            totalBytes: BigInt.from(1048576),
+            isTotalEstimated: false,
+            speedBytesPerSec: 131072.0,
+            etaSeconds: BigInt.from(7),
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state.canPause, isTrue);
+        expect(cubit.state.canCancel, isTrue);
+      },
+    );
   });
 }

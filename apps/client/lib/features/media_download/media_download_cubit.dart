@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:bloc/bloc.dart';
 import 'package:hyper_download_client/core/bridge/models.dart';
@@ -10,6 +11,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
   final MediaDownloadRepository _repository;
   final Future<String?> Function()? getInitialSharedUrl;
   final Stream<String>? sharedUrls;
+  final bool allowInstagramReels;
   StreamSubscription<DownloadProgressEvent>? _progressSubscription;
   StreamSubscription<PlaylistProgressEvent>? _playlistProgressSubscription;
   StreamSubscription<PlaylistSizeEstimate>? _sizeEstimateSubscription;
@@ -22,7 +24,19 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
     required this._repository,
     this.getInitialSharedUrl,
     this.sharedUrls,
-  }) : super(const MediaDownloadState());
+    bool? allowInstagramReels,
+  }) : allowInstagramReels = allowInstagramReels ?? !Platform.isAndroid,
+       super(const MediaDownloadState());
+
+  /// Returns `true` when [rawUrl] points to an `instagram.com` host.
+  static bool isInstagramUrl(String rawUrl) {
+    final host = Uri.tryParse(rawUrl.trim())?.host.toLowerCase() ?? '';
+    if (host.isEmpty) return false;
+    final clean = host.endsWith('.')
+        ? host.substring(0, host.length - 1)
+        : host;
+    return clean == 'instagram.com' || clean.endsWith('.instagram.com');
+  }
 
   /// Checks Rust FFI connectivity and subscribes to live progress events.
   void initialize() {
@@ -122,6 +136,17 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
         state.copyWith(
           inspectionStatus: InspectionStatus.failure,
           inspectionError: 'Please paste or enter a media URL to analyze.',
+        ),
+      );
+      return;
+    }
+
+    if (!allowInstagramReels && isInstagramUrl(targetUrl)) {
+      emit(
+        state.copyWith(
+          inspectionStatus: InspectionStatus.failure,
+          inspectionError:
+              'Instagram Reels downloads are currently supported on Windows only.',
         ),
       );
       return;
@@ -243,6 +268,9 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
   }
 
   void setMediaMode(DownloadMediaMode mode) {
+    if (mode == DownloadMediaMode.audioOnly && state.audioOptions.isEmpty) {
+      return;
+    }
     emit(state.copyWith(mediaMode: mode));
   }
 
