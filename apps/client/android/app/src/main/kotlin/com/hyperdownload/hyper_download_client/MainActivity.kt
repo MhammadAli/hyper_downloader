@@ -3,10 +3,13 @@ package com.hyperdownload.hyper_download_client
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -24,6 +27,7 @@ class MainActivity : FlutterActivity() {
 
     private var pendingSharedUrl: String? = null
     private var platformIntentChannel: MethodChannel? = null
+    private var promptedAllFilesAccess = false
 
     @Volatile
     private var downloadSink: EventChannel.EventSink? = null
@@ -36,6 +40,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ensureTransferPermissions()
         extractSharedUrl(intent)?.let { url ->
             pendingSharedUrl = url
         }
@@ -160,7 +165,7 @@ class MainActivity : FlutterActivity() {
 
             "startDownload" -> {
                 val requestJson = requireArg(call, result, "requestJson") ?: return
-                ensureTransferPermissions()
+                ensureTransferPermissions(promptAllFilesIfMissing = true)
                 dispatchAsync(result, "START_DOWNLOAD_FAILED") {
                     AndroidDownloadEngine.startDownload(applicationContext, requestJson)
                 }
@@ -176,7 +181,7 @@ class MainActivity : FlutterActivity() {
 
             "resumeDownload" -> {
                 val jobId = requireArg(call, result, "jobId") ?: return
-                ensureTransferPermissions()
+                ensureTransferPermissions(promptAllFilesIfMissing = true)
                 dispatchAsync(result, "RESUME_DOWNLOAD_FAILED") {
                     AndroidDownloadEngine.resumeDownload(applicationContext, jobId)
                 }
@@ -209,7 +214,7 @@ class MainActivity : FlutterActivity() {
 
             "startPlaylistDownload" -> {
                 val requestJson = requireArg(call, result, "requestJson") ?: return
-                ensureTransferPermissions()
+                ensureTransferPermissions(promptAllFilesIfMissing = true)
                 dispatchAsync(result, "START_PLAYLIST_FAILED") {
                     AndroidDownloadEngine.startPlaylistDownload(applicationContext, requestJson)
                 }
@@ -225,7 +230,7 @@ class MainActivity : FlutterActivity() {
 
             "resumePlaylistDownload" -> {
                 val sessionId = requireArg(call, result, "sessionId") ?: return
-                ensureTransferPermissions()
+                ensureTransferPermissions(promptAllFilesIfMissing = true)
                 dispatchAsync(result, "RESUME_PLAYLIST_FAILED") {
                     AndroidDownloadEngine.resumePlaylistDownload(applicationContext, sessionId)
                 }
@@ -326,102 +331,121 @@ class MainActivity : FlutterActivity() {
         return envelope.get("ok").toString()
     }
 
-    private fun ensureTransferPermissions() {
-        val missing = mutableListOf<String>()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.POST_NOTIFICATIONS,
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                missing.add(Manifest.permission.POST_NOTIFICATIONS)
+        private fun ensureTransferPermissions(promptAllFilesIfMissing: Boolean = false) {
+            val missing = mutableListOf<String>()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(
+                        this,
+                        Manifest.permission.POST_NOTIFICATIONS,
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    missing.add(Manifest.permission.POST_NOTIFICATIONS)
+                }
             }
-        } else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            if (ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                missing.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
+                if (ContextCompat.checkSelfPermission(
+                        this,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    missing.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                }
+            }
+            if (missing.isNotEmpty()) {
+                ActivityCompat.requestPermissions(this, missing.toTypedArray(), REQUEST_TRANSFER_PERMS)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+                if (promptAllFilesIfMissing || !promptedAllFilesAccess) {
+                    promptedAllFilesAccess = true
+                    val manageIntent = Intent(
+                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:$packageName"),
+                    )
+                    val opened = runCatching {
+                        startActivity(manageIntent)
+                        true
+                    }.getOrDefault(false)
+                    if (!opened) {
+                        runCatching {
+                            startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                        }
+                    }
+                }
             }
         }
-        if (missing.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, missing.toTypedArray(), REQUEST_TRANSFER_PERMS)
-        }
-    }
 
-    private fun extractSharedUrl(intent: Intent?): String? {
-        if (intent?.action != Intent.ACTION_SEND) {
+        private fun extractSharedUrl(intent: Intent?): String? {
+            if (intent?.action != Intent.ACTION_SEND) {
+                return null
+            }
+            val candidates = mutableListOf<String>()
+            intent.getStringExtra(Intent.EXTRA_TEXT)?.let { candidates.add(it) }
+            intent.clipData?.let { clip ->
+                for (i in 0 until clip.itemCount) {
+                    clip.getItemAt(i)?.coerceToText(this)?.toString()?.let { candidates.add(it) }
+                }
+            }
+            for (raw in candidates) {
+                val match = URL_REGEX.find(raw) ?: continue
+                val cleaned = match.value.trimEnd('.', ',', ';', ')', ']', '>', '"', '\'')
+                if (cleaned.startsWith("http://") || cleaned.startsWith("https://")) {
+                    return cleaned
+                }
+            }
             return null
         }
-        val candidates = mutableListOf<String>()
-        intent.getStringExtra(Intent.EXTRA_TEXT)?.let { candidates.add(it) }
-        intent.clipData?.let { clip ->
-            for (i in 0 until clip.itemCount) {
-                clip.getItemAt(i)?.coerceToText(this)?.toString()?.let { candidates.add(it) }
-            }
-        }
-        for (raw in candidates) {
-            val match = URL_REGEX.find(raw) ?: continue
-            val cleaned = match.value.trimEnd('.', ',', ';', ')', ']', '>', '"', '\'')
-            if (cleaned.startsWith("http://") || cleaned.startsWith("https://")) {
-                return cleaned
-            }
-        }
-        return null
-    }
 
-    private fun maybeRunPhaseAProof(intent: Intent?) {
-        if (intent?.getBooleanExtra("phase_a_proof", false) != true) {
-            return
-        }
-        val testUrl =
-            intent.getStringExtra("proof_url") ?: "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
-        engineExecutor.execute {
-            try {
-                Log.i(PROOF_TAG, "Starting Phase A runtime diagnostics...")
-                val diagJson = AndroidDownloadEngine.runDiagnostics(applicationContext)
-                Log.i(PROOF_TAG, "DIAGNOSTICS_JSON=$diagJson")
+        private fun maybeRunPhaseAProof(intent: Intent?) {
+            if (intent?.getBooleanExtra("phase_a_proof", false) != true) {
+                return
+            }
+            val testUrl =
+                intent.getStringExtra("proof_url") ?: "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+            engineExecutor.execute {
+                try {
+                    Log.i(PROOF_TAG, "Starting Phase A runtime diagnostics...")
+                    val diagJson = AndroidDownloadEngine.runDiagnostics(applicationContext)
+                    Log.i(PROOF_TAG, "DIAGNOSTICS_JSON=$diagJson")
 
-                Log.i(PROOF_TAG, "Inspecting authorized test video: $testUrl")
-                val inspectJson = AndroidDownloadEngine.inspectMedia(applicationContext, testUrl)
-                val envelope = JSONObject(inspectJson)
-                if (envelope.has("ok")) {
-                    val ok = envelope.getJSONObject("ok")
-                    val summary = JSONObject().apply {
-                        put("id", ok.optString("id"))
-                        put("title", ok.optString("title"))
-                        put("provider_name", ok.optString("provider_name"))
-                        put("duration_seconds", ok.optDouble("duration_seconds"))
-                        put("formats_count", ok.optJSONArray("formats")?.length() ?: 0)
-                        put("video_options_count", ok.optJSONArray("video_options")?.length() ?: 0)
-                        put("audio_options_count", ok.optJSONArray("audio_options")?.length() ?: 0)
-                        put("original_audio", ok.opt("original_audio"))
+                    Log.i(PROOF_TAG, "Inspecting authorized test video: $testUrl")
+                    val inspectJson = AndroidDownloadEngine.inspectMedia(applicationContext, testUrl)
+                    val envelope = JSONObject(inspectJson)
+                    if (envelope.has("ok")) {
+                        val ok = envelope.getJSONObject("ok")
+                        val summary = JSONObject().apply {
+                            put("id", ok.optString("id"))
+                            put("title", ok.optString("title"))
+                            put("provider_name", ok.optString("provider_name"))
+                            put("duration_seconds", ok.optDouble("duration_seconds"))
+                            put("formats_count", ok.optJSONArray("formats")?.length() ?: 0)
+                            put("video_options_count", ok.optJSONArray("video_options")?.length() ?: 0)
+                            put("audio_options_count", ok.optJSONArray("audio_options")?.length() ?: 0)
+                            put("original_audio", ok.opt("original_audio"))
+                        }
+                        Log.i(PROOF_TAG, "INSPECT_SUMMARY_JSON=$summary")
+                    } else {
+                        Log.e(PROOF_TAG, "INSPECT_ERROR_JSON=$inspectJson")
                     }
-                    Log.i(PROOF_TAG, "INSPECT_SUMMARY_JSON=$summary")
-                } else {
-                    Log.e(PROOF_TAG, "INSPECT_ERROR_JSON=$inspectJson")
+                } catch (t: Throwable) {
+                    Log.e(PROOF_TAG, "PHASE_A_PROOF_EXCEPTION=${t.stackTraceToString()}")
                 }
-            } catch (t: Throwable) {
-                Log.e(PROOF_TAG, "PHASE_A_PROOF_EXCEPTION=${t.stackTraceToString()}")
             }
         }
-    }
 
-    override fun onDestroy() {
-        engineExecutor.shutdownNow()
-        super.onDestroy()
-    }
+        override fun onDestroy() {
+            engineExecutor.shutdownNow()
+            super.onDestroy()
+        }
 
-    companion object {
-        private const val PROOF_TAG = "HyperDownloadProof"
-        private const val ENGINE_CHANNEL = "com.hyperdownload/media_engine"
-        private const val PLATFORM_INTENT_CHANNEL = "com.hyperdownload/platform_intents"
-        private const val DOWNLOAD_PROGRESS_CHANNEL = "com.hyperdownload/download_progress"
-        private const val PLAYLIST_PROGRESS_CHANNEL = "com.hyperdownload/playlist_progress"
-        private const val PLAYLIST_SIZE_ESTIMATE_CHANNEL =
-            "com.hyperdownload/playlist_size_estimate"
-        private const val REQUEST_TRANSFER_PERMS = 9101
-        private val URL_REGEX = Regex("https?://[^\\s<>\"']+")
+        companion object {
+            private const val PROOF_TAG = "HyperDownloadProof"
+            private const val ENGINE_CHANNEL = "com.hyperdownload/media_engine"
+            private const val PLATFORM_INTENT_CHANNEL = "com.hyperdownload/platform_intents"
+            private const val DOWNLOAD_PROGRESS_CHANNEL = "com.hyperdownload/download_progress"
+            private const val PLAYLIST_PROGRESS_CHANNEL = "com.hyperdownload/playlist_progress"
+            private const val PLAYLIST_SIZE_ESTIMATE_CHANNEL =
+                "com.hyperdownload/playlist_size_estimate"
+            private const val REQUEST_TRANSFER_PERMS = 9101
+            private val URL_REGEX = Regex("https?://[^\\s<>\"']+")
+        }
     }
-}

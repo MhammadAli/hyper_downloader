@@ -9,10 +9,12 @@ use crate::models::{
 use crate::selection::{build_quality_options, extract_xtags_acont, RawFormatCandidate};
 use crate::win_job::ProcessTreeJob;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -25,6 +27,91 @@ const DOWNLOAD_PROGRESS_TEMPLATE: &str =
 const POSTPROCESS_PROGRESS_TEMPLATE: &str =
     "postprocess:HYPERDL_PP|%(progress.status)s|%(progress.postprocessor)s";
 const CANCEL_WAIT_TIMEOUT_SECS: u64 = 5;
+const RAW_INSPECT_CACHE_MAX_ENTRIES: usize = 64;
+const RAW_INSPECT_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
+
+struct CachedRawInspection {
+    raw_json: String,
+    cached_at: Instant,
+    last_used: Instant,
+}
+
+fn raw_inspection_cache() -> &'static std::sync::Mutex<HashMap<String, CachedRawInspection>> {
+    static CACHE: OnceLock<std::sync::Mutex<HashMap<String, CachedRawInspection>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+pub(crate) fn cache_raw_inspection_json(url: &str, raw_json: &str) {
+    let key = url.trim().to_string();
+    if key.is_empty() || raw_json.trim().is_empty() {
+        return;
+    }
+    let now = Instant::now();
+    if let Ok(mut guard) = raw_inspection_cache().lock() {
+        guard.retain(|_, v| now.duration_since(v.cached_at) <= RAW_INSPECT_CACHE_TTL);
+        if guard.len() >= RAW_INSPECT_CACHE_MAX_ENTRIES && !guard.contains_key(&key) {
+            if let Some(oldest_key) = guard
+                .iter()
+                .min_by_key(|(_, v)| v.last_used)
+                .map(|(k, _)| k.clone())
+            {
+                guard.remove(&oldest_key);
+            }
+        }
+        guard.insert(
+            key,
+            CachedRawInspection {
+                raw_json: raw_json.to_string(),
+                cached_at: now,
+                last_used: now,
+            },
+        );
+    }
+}
+
+pub(crate) fn get_cached_raw_inspection_json(url: &str) -> Option<String> {
+    let key = url.trim();
+    if key.is_empty() {
+        return None;
+    }
+    let now = Instant::now();
+    let mut guard = raw_inspection_cache().lock().ok()?;
+    if let Some(entry) = guard.get_mut(key) {
+        if now.duration_since(entry.cached_at) <= RAW_INSPECT_CACHE_TTL {
+            entry.last_used = now;
+            return Some(entry.raw_json.clone());
+        }
+    }
+    guard.remove(key);
+    None
+}
+
+pub(crate) fn evict_cached_raw_inspection_json(url: &str) {
+    let key = url.trim();
+    if key.is_empty() {
+        return;
+    }
+    if let Ok(mut guard) = raw_inspection_cache().lock() {
+        guard.remove(key);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn clear_raw_inspection_json_cache() {
+    if let Ok(mut guard) = raw_inspection_cache().lock() {
+        guard.clear();
+    }
+}
+
+pub(crate) async fn write_cached_info_json_temp_file(
+    tag: &str,
+    raw_json: &str,
+) -> Result<PathBuf, EngineError> {
+    let file_path = std::env::temp_dir().join(format!("hyperdl_info_{tag}.json"));
+    tokio::fs::write(&file_path, raw_json.as_bytes()).await?;
+    Ok(file_path)
+}
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -655,12 +742,11 @@ pub fn build_inspect_args(paths: &ToolPaths, url: &str) -> Vec<OsString> {
     ]
 }
 
-/// Builds typed `yt-dlp` download/merge command arguments without shell interpolation.
-pub fn build_download_args(
+fn build_download_common_args(
     paths: &ToolPaths,
     request: &StartDownloadRequest,
     output_template: &str,
-) -> Result<Vec<OsString>, EngineError> {
+) -> Result<(String, Vec<OsString>), EngineError> {
     let validated_url = validate_media_url(&request.url)?;
     let (format_expr, merge_container) = match request.selection.kind {
         DownloadSelectionKind::Single => {
@@ -725,9 +811,32 @@ pub fn build_download_args(
 
     args.push(OsString::from("-o"));
     args.push(OsString::from(output_template));
+
+    Ok((validated_url, args))
+}
+
+/// Builds deterministic `yt-dlp.exe` arguments for single-stream or merged downloads.
+pub fn build_download_args(
+    paths: &ToolPaths,
+    request: &StartDownloadRequest,
+    output_template: &str,
+) -> Result<Vec<OsString>, EngineError> {
+    let (validated_url, mut args) = build_download_common_args(paths, request, output_template)?;
     args.push(OsString::from("--"));
     args.push(OsString::from(validated_url));
+    Ok(args)
+}
 
+/// Builds `yt-dlp.exe` arguments that reuse a cached `--load-info-json` inspection file.
+pub fn build_download_args_from_info_json(
+    paths: &ToolPaths,
+    request: &StartDownloadRequest,
+    output_template: &str,
+    info_json_path: &Path,
+) -> Result<Vec<OsString>, EngineError> {
+    let (_, mut args) = build_download_common_args(paths, request, output_template)?;
+    args.push(OsString::from("--load-info-json"));
+    args.push(info_json_path.as_os_str().to_os_string());
     Ok(args)
 }
 
@@ -800,7 +909,9 @@ async fn inspect_media_with_paths(
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_yt_dlp_inspection_json(&stdout)
+    let parsed = parse_yt_dlp_inspection_json(&stdout)?;
+    cache_raw_inspection_json(validated_url, &stdout);
+    Ok(parsed)
 }
 
 #[derive(Debug)]
@@ -881,10 +992,10 @@ impl DownloadManager {
             .into_owned();
 
         // Validate arguments before recording active job state.
-        let args = build_download_args(&paths, &request, &output_template)?;
+        let _ = build_download_args(&paths, &request, &output_template)?;
         let job_id = Uuid::new_v4().to_string();
 
-        self.launch_job(job_id.clone(), request, output_template, paths, args)
+        self.launch_job(job_id.clone(), request, output_template, paths)
             .await?;
         Ok(job_id)
     }
@@ -946,8 +1057,8 @@ impl DownloadManager {
         };
 
         let paths = ToolPaths::resolve()?;
-        let args = build_download_args(&paths, &request, &output_template)?;
-        self.launch_job(job_id.to_string(), request, output_template, paths, args)
+        let _ = build_download_args(&paths, &request, &output_template)?;
+        self.launch_job(job_id.to_string(), request, output_template, paths)
             .await?;
         Ok(job_id.to_string())
     }
@@ -958,7 +1069,6 @@ impl DownloadManager {
         request: StartDownloadRequest,
         output_template: String,
         paths: ToolPaths,
-        args: Vec<OsString>,
     ) -> Result<(), EngineError> {
         let cancel_requested = Arc::new(AtomicBool::new(false));
         let done_notify = Arc::new(Notify::new());
@@ -975,8 +1085,8 @@ impl DownloadManager {
 
             *guard = Some(ActiveJobState {
                 job_id: job_id.clone(),
-                request,
-                output_template,
+                request: request.clone(),
+                output_template: output_template.clone(),
                 is_running: true,
                 cancel_requested: cancel_requested.clone(),
                 process_job: None,
@@ -999,7 +1109,14 @@ impl DownloadManager {
         let manager = self.clone();
         shared_runtime().spawn(async move {
             manager
-                .run_download_worker(job_id, paths, args, cancel_requested, done_notify)
+                .run_download_worker(
+                    job_id,
+                    paths,
+                    request,
+                    output_template,
+                    cancel_requested,
+                    done_notify,
+                )
                 .await;
         });
 
@@ -1010,10 +1127,84 @@ impl DownloadManager {
         self: Arc<Self>,
         job_id: String,
         paths: ToolPaths,
-        args: Vec<OsString>,
+        request: StartDownloadRequest,
+        output_template: String,
         cancel_requested: Arc<AtomicBool>,
         done_notify: Arc<Notify>,
     ) {
+        let mut final_event: Option<DownloadProgressEvent> = None;
+
+        if let Some(cached_raw) = get_cached_raw_inspection_json(&request.url) {
+            if let Ok(info_path) = write_cached_info_json_temp_file(&job_id, &cached_raw).await {
+                if let Ok(cached_args) = build_download_args_from_info_json(
+                    &paths,
+                    &request,
+                    &output_template,
+                    &info_path,
+                ) {
+                    let cached_outcome = self
+                        .execute_download_attempt(&job_id, &paths, &cached_args, &cancel_requested)
+                        .await;
+                    let _ = tokio::fs::remove_file(&info_path).await;
+                    if cached_outcome.phase != DownloadPhase::Failed
+                        || cancel_requested.load(Ordering::SeqCst)
+                    {
+                        final_event = Some(cached_outcome);
+                    } else {
+                        evict_cached_raw_inspection_json(&request.url);
+                        let _ = self.tx.send(DownloadProgressEvent {
+                            job_id: job_id.clone(),
+                            phase: DownloadPhase::Analyzing,
+                            downloaded_bytes: 0,
+                            total_bytes: None,
+                            is_total_estimated: false,
+                            speed_bytes_per_sec: None,
+                            eta_seconds: None,
+                            output_path: None,
+                            message: Some(
+                                "Cached analysis expired, refreshing video metadata...".into(),
+                            ),
+                        });
+                    }
+                } else {
+                    let _ = tokio::fs::remove_file(&info_path).await;
+                }
+            }
+        }
+
+        let resolved_final = match final_event {
+            Some(ev) => ev,
+            None => match build_download_args(&paths, &request, &output_template) {
+                Ok(fresh_args) => {
+                    self.execute_download_attempt(&job_id, &paths, &fresh_args, &cancel_requested)
+                        .await
+                }
+                Err(err) => DownloadProgressEvent {
+                    job_id: job_id.clone(),
+                    phase: DownloadPhase::Failed,
+                    downloaded_bytes: 0,
+                    total_bytes: None,
+                    is_total_estimated: false,
+                    speed_bytes_per_sec: None,
+                    eta_seconds: None,
+                    output_path: None,
+                    message: Some(err.to_string()),
+                },
+            },
+        };
+
+        self.finish_job(&job_id, false, None).await;
+        let _ = self.tx.send(resolved_final);
+        done_notify.notify_waiters();
+    }
+
+    async fn execute_download_attempt(
+        &self,
+        job_id: &str,
+        paths: &ToolPaths,
+        args: &[OsString],
+        cancel_requested: &Arc<AtomicBool>,
+    ) -> DownloadProgressEvent {
         let path_record_file = std::env::temp_dir().join(format!("hyperdl_path_{job_id}.txt"));
         let _ = tokio::fs::remove_file(&path_record_file).await;
 
@@ -1022,7 +1213,7 @@ impl DownloadManager {
             .arg("--print-to-file")
             .arg("after_move:%(filepath)s")
             .arg(&path_record_file)
-            .args(&args);
+            .args(args);
         cmd.stdin(std::process::Stdio::null());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -1032,9 +1223,8 @@ impl DownloadManager {
             Ok(c) => c,
             Err(err) => {
                 let _ = tokio::fs::remove_file(&path_record_file).await;
-                self.finish_job(&job_id, false, None).await;
-                let _ = self.tx.send(DownloadProgressEvent {
-                    job_id,
+                return DownloadProgressEvent {
+                    job_id: job_id.to_string(),
                     phase: DownloadPhase::Failed,
                     downloaded_bytes: 0,
                     total_bytes: None,
@@ -1043,9 +1233,7 @@ impl DownloadManager {
                     eta_seconds: None,
                     output_path: None,
                     message: Some(format!("Failed to launch yt-dlp: {err}")),
-                });
-                done_notify.notify_waiters();
-                return;
+                };
             }
         };
 
@@ -1116,7 +1304,7 @@ impl DownloadManager {
                             None
                         };
                         let _ = self.tx.send(DownloadProgressEvent {
-                            job_id: job_id.clone(),
+                            job_id: job_id.to_string(),
                             phase: DownloadPhase::Downloading,
                             downloaded_bytes,
                             total_bytes: last_total,
@@ -1133,7 +1321,7 @@ impl DownloadManager {
                     } => {
                         last_phase = DownloadPhase::Merging;
                         let _ = self.tx.send(DownloadProgressEvent {
-                            job_id: job_id.clone(),
+                            job_id: job_id.to_string(),
                             phase: DownloadPhase::Merging,
                             downloaded_bytes: last_downloaded,
                             total_bytes: last_total,
@@ -1153,6 +1341,12 @@ impl DownloadManager {
         }
 
         let wait_result = child.wait().await;
+        {
+            let mut guard = self.job.lock().await;
+            if let Some(state) = guard.as_mut().filter(|s| s.job_id == job_id) {
+                state.process_job = None;
+            }
+        }
         let stderr_text = stderr_task.await.unwrap_or_default();
         let recorded_output_path = tokio::fs::read_to_string(&path_record_file)
             .await
@@ -1167,11 +1361,9 @@ impl DownloadManager {
             });
         let _ = tokio::fs::remove_file(&path_record_file).await;
 
-        self.finish_job(&job_id, false, None).await;
-
-        let final_event = if cancel_requested.load(Ordering::SeqCst) {
-            DownloadProgressEvent {
-                job_id: job_id.clone(),
+        if cancel_requested.load(Ordering::SeqCst) {
+            return DownloadProgressEvent {
+                job_id: job_id.to_string(),
                 phase: DownloadPhase::Canceled,
                 downloaded_bytes: last_downloaded,
                 total_bytes: last_total,
@@ -1180,52 +1372,41 @@ impl DownloadManager {
                 eta_seconds: None,
                 output_path: recorded_output_path.or(detected_output_path),
                 message: Some("Download canceled. Partial data preserved for resume.".into()),
-            }
-        } else {
-            match wait_result {
-                Ok(status) if status.success() => {
-                    let final_output_path = recorded_output_path.or(detected_output_path);
-                    let final_disk_bytes = match final_output_path.as_deref() {
-                        Some(path) => tokio::fs::metadata(path).await.ok().map(|m| m.len()),
-                        None => None,
-                    };
-                    let final_total = final_disk_bytes.or(last_total);
-                    DownloadProgressEvent {
-                        job_id: job_id.clone(),
-                        phase: DownloadPhase::Completed,
-                        downloaded_bytes: final_total.unwrap_or(last_downloaded),
-                        total_bytes: final_total,
-                        is_total_estimated: if final_disk_bytes.is_some() {
-                            false
-                        } else {
-                            last_estimated
-                        },
-                        speed_bytes_per_sec: None,
-                        eta_seconds: Some(0),
-                        output_path: final_output_path,
-                        message: Some("Download completed.".into()),
-                    }
-                }
-                Ok(status) => {
-                    let msg = if stderr_text.trim().is_empty() {
-                        format!("yt-dlp exited with code {:?}", status.code())
+            };
+        }
+
+        match wait_result {
+            Ok(status) if status.success() => {
+                let final_output_path = recorded_output_path.or(detected_output_path);
+                let final_disk_bytes = match final_output_path.as_deref() {
+                    Some(path) => tokio::fs::metadata(path).await.ok().map(|m| m.len()),
+                    None => None,
+                };
+                let final_total = final_disk_bytes.or(last_total);
+                DownloadProgressEvent {
+                    job_id: job_id.to_string(),
+                    phase: DownloadPhase::Completed,
+                    downloaded_bytes: final_total.unwrap_or(last_downloaded),
+                    total_bytes: final_total,
+                    is_total_estimated: if final_disk_bytes.is_some() {
+                        false
                     } else {
-                        stderr_text.trim().to_string()
-                    };
-                    DownloadProgressEvent {
-                        job_id: job_id.clone(),
-                        phase: DownloadPhase::Failed,
-                        downloaded_bytes: last_downloaded,
-                        total_bytes: last_total,
-                        is_total_estimated: last_estimated,
-                        speed_bytes_per_sec: None,
-                        eta_seconds: None,
-                        output_path: detected_output_path,
-                        message: Some(msg),
-                    }
+                        last_estimated
+                    },
+                    speed_bytes_per_sec: None,
+                    eta_seconds: Some(0),
+                    output_path: final_output_path,
+                    message: Some("Download completed.".into()),
                 }
-                Err(err) => DownloadProgressEvent {
-                    job_id: job_id.clone(),
+            }
+            Ok(status) => {
+                let msg = if stderr_text.trim().is_empty() {
+                    format!("yt-dlp exited with code {:?}", status.code())
+                } else {
+                    stderr_text.trim().to_string()
+                };
+                DownloadProgressEvent {
+                    job_id: job_id.to_string(),
                     phase: DownloadPhase::Failed,
                     downloaded_bytes: last_downloaded,
                     total_bytes: last_total,
@@ -1233,13 +1414,21 @@ impl DownloadManager {
                     speed_bytes_per_sec: None,
                     eta_seconds: None,
                     output_path: detected_output_path,
-                    message: Some(format!("Failed waiting for yt-dlp process: {err}")),
-                },
+                    message: Some(msg),
+                }
             }
-        };
-
-        let _ = self.tx.send(final_event);
-        done_notify.notify_waiters();
+            Err(err) => DownloadProgressEvent {
+                job_id: job_id.to_string(),
+                phase: DownloadPhase::Failed,
+                downloaded_bytes: last_downloaded,
+                total_bytes: last_total,
+                is_total_estimated: last_estimated,
+                speed_bytes_per_sec: None,
+                eta_seconds: None,
+                output_path: detected_output_path,
+                message: Some(format!("Failed waiting for yt-dlp process: {err}")),
+            },
+        }
     }
 
     async fn finish_job(
@@ -2029,5 +2218,62 @@ mod tests {
             streams.iter().any(|s| s["codec_type"] == "audio"),
             "final merged file must contain an audio stream: {probe_json}"
         );
+    }
+
+    #[test]
+    fn raw_inspection_cache_roundtrip_and_eviction() {
+        clear_raw_inspection_json_cache();
+        let url = "https://www.youtube.com/watch?v=aqz-KE-bpKQ";
+        let payload = r#"{"id":"aqz-KE-bpKQ","title":"BBB"}"#;
+        assert!(get_cached_raw_inspection_json(url).is_none());
+
+        cache_raw_inspection_json(&format!("  {url}  "), payload);
+        assert_eq!(
+            get_cached_raw_inspection_json(url).as_deref(),
+            Some(payload)
+        );
+
+        evict_cached_raw_inspection_json(url);
+        assert!(get_cached_raw_inspection_json(url).is_none());
+    }
+
+    #[test]
+    fn build_download_args_from_info_json_shares_flags_and_passes_info_json() {
+        let paths = ToolPaths {
+            yt_dlp_exe: PathBuf::from("C:/tools/yt-dlp.exe"),
+            node_exe: PathBuf::from("C:/tools/node.exe"),
+            ffmpeg_exe: PathBuf::from("C:/tools/ffmpeg.exe"),
+            default_output_dir: PathBuf::from("C:/downloads"),
+        };
+        let req = StartDownloadRequest {
+            url: "https://www.youtube.com/watch?v=aqz-KE-bpKQ".into(),
+            title: Some("BBB".into()),
+            selection: DownloadFormatSelection::video_and_audio("137", "140", "mp4"),
+            output_directory: None,
+        };
+        let info_path = PathBuf::from("C:/temp/hyperdl_info_job1.json");
+        let args = build_download_args_from_info_json(
+            &paths,
+            &req,
+            "C:/downloads/%(title)s.%(ext)s",
+            &info_path,
+        )
+        .expect("cached info args build");
+
+        let rendered: Vec<String> = args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(rendered.windows(2).any(|w| w == ["-f", "137+140"]));
+        assert!(rendered
+            .windows(2)
+            .any(|w| w == ["--merge-output-format", "mp4"]));
+        assert!(rendered
+            .windows(2)
+            .any(|w| w == ["--load-info-json", "C:/temp/hyperdl_info_job1.json"]));
+        assert!(!rendered.iter().any(|s| s == "--"));
+        assert!(!rendered
+            .iter()
+            .any(|s| s == "https://www.youtube.com/watch?v=aqz-KE-bpKQ"));
     }
 }
