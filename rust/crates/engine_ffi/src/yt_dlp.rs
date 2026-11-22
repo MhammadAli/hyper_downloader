@@ -235,6 +235,113 @@ pub(crate) fn invalidate_cached_instagram_info_json(canonical_url: &str) {
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// Name of the main HyperDownload folder created inside the Windows `Videos` known folder.
+pub(crate) const APP_DOWNLOAD_FOLDER_NAME: &str = "HyperDownload";
+/// Subfolder receiving video downloads (Video with Sound).
+pub(crate) const VIDEO_SUBFOLDER_NAME: &str = "Videos";
+/// Subfolder receiving audio-only downloads.
+pub(crate) const AUDIO_SUBFOLDER_NAME: &str = "Audios";
+const AUDIO_FORMAT_REGISTRY_MAX_KEYS: usize = 64;
+
+#[cfg(windows)]
+fn windows_videos_known_folder() -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::{FOLDERID_Videos, SHGetKnownFolderPath};
+
+    let mut raw: *mut u16 = std::ptr::null_mut();
+    // SAFETY: `raw` receives a CoTaskMem-allocated, NUL-terminated wide string that is
+    // freed exactly once below; the folder id pointer is valid for the call duration.
+    unsafe {
+        let hr = SHGetKnownFolderPath(&FOLDERID_Videos, 0, std::ptr::null_mut(), &mut raw);
+        let result = if hr == 0 && !raw.is_null() {
+            let mut len = 0usize;
+            while *raw.add(len) != 0 {
+                len += 1;
+            }
+            let wide = std::slice::from_raw_parts(raw, len);
+            Some(PathBuf::from(std::ffi::OsString::from_wide(wide)))
+        } else {
+            None
+        };
+        if !raw.is_null() {
+            CoTaskMemFree(raw as *const std::ffi::c_void);
+        }
+        result
+    }
+}
+
+/// Default main download folder: `<Windows Videos folder>\HyperDownload` (Windows only).
+fn default_windows_download_root() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        let videos = windows_videos_known_folder()
+            .or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join("Videos")))?;
+        Some(videos.join(APP_DOWNLOAD_FOLDER_NAME))
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// Returns `<root>\Audios` for audio-only downloads and `<root>\Videos` otherwise.
+pub(crate) fn media_subfolder(root: &Path, is_audio_only: bool) -> PathBuf {
+    root.join(if is_audio_only {
+        AUDIO_SUBFOLDER_NAME
+    } else {
+        VIDEO_SUBFOLDER_NAME
+    })
+}
+
+fn audio_format_registry() -> &'static std::sync::Mutex<HashMap<String, Vec<String>>> {
+    static REGISTRY: OnceLock<std::sync::Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Remembers which discovered format ids are audio-only so single-format downloads can be
+/// routed to the `Audios` folder without changing the FFI request model.
+pub(crate) fn register_audio_only_format_ids(keys: &[&str], format_ids: Vec<String>) {
+    let Ok(mut guard) = audio_format_registry().lock() else {
+        return;
+    };
+    if guard.len() >= AUDIO_FORMAT_REGISTRY_MAX_KEYS {
+        guard.clear();
+    }
+    for key in keys.iter().filter(|k| !k.trim().is_empty()) {
+        guard.insert((*key).to_string(), format_ids.clone());
+    }
+}
+
+fn is_registered_audio_only_format(url: &str, format_id: &str) -> bool {
+    audio_format_registry()
+        .lock()
+        .ok()
+        .and_then(|guard| {
+            guard
+                .get(url)
+                .map(|ids| ids.iter().any(|id| id == format_id))
+        })
+        .unwrap_or(false)
+}
+
+/// Decides whether a request downloads audio only (routed to the `Audios` folder).
+pub(crate) fn request_is_audio_only(request: &StartDownloadRequest, original_url: &str) -> bool {
+    match request.selection.kind {
+        DownloadSelectionKind::VideoAndAudio => false,
+        DownloadSelectionKind::Single => request
+            .selection
+            .format_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .is_some_and(|id| {
+                is_registered_audio_only_format(&request.url, id)
+                    || is_registered_audio_only_format(original_url, id)
+            }),
+    }
+}
+
 /// Errors returned by the `yt-dlp` integration layer.
 #[derive(Debug, Error)]
 pub enum EngineError {
@@ -379,6 +486,7 @@ impl ToolPaths {
         let default_output_dir = overrides
             .output_dir
             .clone()
+            .or_else(default_windows_download_root)
             .or_else(|| {
                 proto_roots
                     .first()
@@ -1538,6 +1646,18 @@ async fn inspect_media_with_paths(
     let parse_start = std::time::Instant::now();
     match parse_yt_dlp_inspection_json(&output.stdout) {
         Ok(inspected) => {
+            register_audio_only_format_ids(
+                &[
+                    validated_url,
+                    inspected.webpage_url.as_str(),
+                    inspected.id.as_str(),
+                ],
+                inspected
+                    .audio_options
+                    .iter()
+                    .map(|a| a.format_id.clone())
+                    .collect(),
+            );
             if platform == MediaPlatform::InstagramReel {
                 store_cached_instagram_info_json(validated_url, &output.stdout);
                 eprintln!(
@@ -1625,6 +1745,7 @@ impl DownloadManager {
         mut request: StartDownloadRequest,
     ) -> Result<String, EngineError> {
         let classified = classify_and_normalize_url(&request.url)?;
+        let original_url = request.url.clone();
         request.url = classified.normalized_url.clone();
 
         let paths = ToolPaths::resolve()?;
@@ -1635,7 +1756,10 @@ impl DownloadManager {
             .filter(|s| !s.is_empty())
         {
             Some(custom) => PathBuf::from(custom),
-            None => paths.default_output_dir.clone(),
+            None => media_subfolder(
+                &paths.default_output_dir,
+                request_is_audio_only(&request, &original_url),
+            ),
         };
         tokio::fs::create_dir_all(&output_dir).await?;
 
@@ -2655,6 +2779,46 @@ mod tests {
             parse_progress_line("[info] DTVTvUDj-b1: Downloading 1 format(s): dash-v+dash-a"),
             ParsedYtDlpLine::StageStatus("Resolving media...".into())
         );
+    }
+
+    #[test]
+    fn routes_default_downloads_into_videos_and_audios_subfolders() {
+        let root = Path::new("root");
+        assert_eq!(media_subfolder(root, false), root.join("Videos"));
+        assert_eq!(media_subfolder(root, true), root.join("Audios"));
+
+        let url = "https://www.youtube.com/watch?v=ROUTE_TEST_1";
+        register_audio_only_format_ids(&[url], vec!["140-19".into(), "251".into()]);
+        let audio_req = StartDownloadRequest {
+            url: url.into(),
+            title: None,
+            selection: DownloadFormatSelection::single("140-19"),
+            output_directory: None,
+        };
+        assert!(request_is_audio_only(&audio_req, url));
+        let video_req = StartDownloadRequest {
+            url: url.into(),
+            title: None,
+            selection: DownloadFormatSelection::single("18"),
+            output_directory: None,
+        };
+        assert!(!request_is_audio_only(&video_req, url));
+        let merge_req = StartDownloadRequest {
+            url: url.into(),
+            title: None,
+            selection: DownloadFormatSelection::video_and_audio("299", "140-19", "mp4"),
+            output_directory: None,
+        };
+        assert!(!request_is_audio_only(&merge_req, url));
+
+        #[cfg(windows)]
+        {
+            let default_root = default_windows_download_root().expect("windows videos folder");
+            assert!(default_root.ends_with("HyperDownload"));
+            assert!(default_root
+                .parent()
+                .is_some_and(|p| p.file_name().is_some_and(|n| n == "Videos")));
+        }
     }
 
     #[test]

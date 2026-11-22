@@ -15,9 +15,9 @@ use crate::selection::{format_bytes_human, format_display_size, select_playlist_
 use crate::win_job::ProcessTreeJob;
 use crate::yt_dlp::{
     build_download_args, build_inspect_args, configure_subprocess, extract_thumbnail_url,
-    infer_provider_from_url, json_f64, json_non_empty_str, json_u64, parse_progress_line,
-    parse_yt_dlp_inspection_json, shared_runtime, validate_media_url, EngineError, ParsedYtDlpLine,
-    ToolPaths,
+    infer_provider_from_url, json_f64, json_non_empty_str, json_u64, media_subfolder,
+    parse_progress_line, parse_yt_dlp_inspection_json, shared_runtime, validate_media_url,
+    EngineError, ParsedYtDlpLine, ToolPaths,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -1159,8 +1159,25 @@ impl PlaylistManager {
         playlist_id: &str,
         custom_output_dir: Option<String>,
     ) -> Result<Option<PlaylistSessionSnapshot>, EngineError> {
+        let has_custom_dir = custom_output_dir
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|s| !s.is_empty());
         let base_dir = resolve_base_output_dir(custom_output_dir)?;
-        let Some(snapshot) = load_saved_playlist_session(&base_dir, playlist_id).await? else {
+        let mut search_dirs = Vec::new();
+        if !has_custom_dir {
+            search_dirs.push(media_subfolder(&base_dir, false));
+            search_dirs.push(media_subfolder(&base_dir, true));
+        }
+        search_dirs.push(base_dir);
+        let mut loaded = None;
+        for dir in &search_dirs {
+            if let Some(found) = load_saved_playlist_session(dir, playlist_id).await? {
+                loaded = Some(found);
+                break;
+            }
+        }
+        let Some(snapshot) = loaded else {
             return Ok(None);
         };
 
@@ -1202,7 +1219,10 @@ impl PlaylistManager {
             .filter(|s| !s.is_empty())
         {
             Some(dir) => PathBuf::from(dir),
-            None => paths.default_output_dir.clone(),
+            None => media_subfolder(
+                &paths.default_output_dir,
+                request.media_mode == PlaylistMediaMode::AudioOnly,
+            ),
         };
 
         let playlist_dir =
