@@ -2,6 +2,7 @@ package com.hyperdownload.hyper_download_client
 
 import android.app.job.JobParameters
 import android.content.Context
+import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
@@ -216,14 +217,28 @@ object AndroidDownloadEngine {
     fun inspectUrl(context: Context, url: String): String {
         val appCtx = context.applicationContext
         return workerModule(appCtx)
-            .callAttr("inspect_url", url, nativeLibDir(appCtx), binDir(appCtx), cacheDir(appCtx))
+            .callAttr(
+                "inspect_url",
+                url,
+                nativeLibDir(appCtx),
+                binDir(appCtx),
+                cacheDir(appCtx),
+                Build.VERSION.SDK_INT,
+            )
             .toString()
     }
 
     fun inspectMedia(context: Context, url: String): String {
         val appCtx = context.applicationContext
         return workerModule(appCtx)
-            .callAttr("inspect_media", url, nativeLibDir(appCtx), binDir(appCtx), cacheDir(appCtx))
+            .callAttr(
+                "inspect_media",
+                url,
+                nativeLibDir(appCtx),
+                binDir(appCtx),
+                cacheDir(appCtx),
+                Build.VERSION.SDK_INT,
+            )
             .toString()
     }
 

@@ -13,10 +13,13 @@ import json
 import math
 import os
 import socket
+import ssl
+import struct
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 
 import certifi
 import yt_dlp
@@ -33,6 +36,9 @@ _RAW_INFO_CACHE_MAX = 64
 _RAW_INFO_CACHE_TTL_SECS = 1800.0
 _INSTAGRAM_RAW_INFO_CACHE_TTL_SECS = 900.0
 _INSTAGRAM_SOCKET_TIMEOUT_SECS = 40
+_ANDROID_VP9_MP4_MIN_SDK = 29
+_MP4_HEADER_PROBE_BYTES = 65536
+_MP4_HEADER_PROBE_TIMEOUT_SECS = 6
 
 _TRACK_LOCK = threading.Lock()
 _CURRENT_JOB = threading.local()
@@ -647,8 +653,285 @@ def run_diagnostics(native_lib_dir: str, bin_dir: str) -> str:
     return json.dumps(report)
 
 
+def _is_legacy_android_incompatible_vcodec(vcodec) -> bool:
+    if not isinstance(vcodec, str):
+        return False
+    lower = vcodec.strip().lower()
+    return lower.startswith(("vp09", "vp9", "vp08", "vp8", "av01", "av1"))
+
+
+def _is_avc_vcodec(vcodec) -> bool:
+    if not isinstance(vcodec, str):
+        return False
+    lower = vcodec.strip().lower()
+    return lower.startswith(("avc1", "avc3", "h264"))
+
+
+def _is_unset_codec(codec) -> bool:
+    if codec is None:
+        return True
+    if not isinstance(codec, str):
+        return False
+    return codec.strip().lower() in ("", "unknown")
+
+
+def _is_audio_only_format(fmt: dict) -> bool:
+    vcodec = str(fmt.get("vcodec") or "").strip().lower()
+    acodec = str(fmt.get("acodec") or "").strip().lower()
+    resolution = str(fmt.get("resolution") or "").strip().lower()
+    audio_ext = str(fmt.get("audio_ext") or "").strip().lower()
+    if vcodec == "none" and acodec not in ("", "none"):
+        return True
+    if resolution == "audio only" and audio_ext not in ("", "none"):
+        return True
+    return False
+
+
+def _parse_mp4_header_metadata(data: bytes) -> dict:
+    """Extracts video/audio codec FourCCs and dimensions from an ISO-BMFF header prefix."""
+    result = {"vcodec": None, "acodec": None, "width": None, "height": None}
+    if not isinstance(data, (bytes, bytearray)) or len(data) < 8:
+        return result
+
+    containers = {b"moov", b"trak", b"mdia", b"minf", b"stbl"}
+    video_boxes = {b"avc1", b"avc3", b"hvc1", b"hev1", b"vp09", b"vp08", b"av01", b"mp4v"}
+    audio_boxes = {b"mp4a", b"Opus", b"ac-3", b"ec-3"}
+
+    def walk(start: int, end: int):
+        pos = start
+        while pos + 8 <= end:
+            size, typ = struct.unpack(">I4s", data[pos : pos + 8])
+            hdr = 8
+            if size == 1:
+                if pos + 16 > end:
+                    break
+                size = struct.unpack(">Q", data[pos + 8 : pos + 16])[0]
+                hdr = 16
+            elif size == 0:
+                size = end - pos
+            if size < hdr:
+                break
+            box_end = min(pos + size, end)
+            body_start = pos + hdr
+            if typ in containers:
+                walk(body_start, box_end)
+            elif typ == b"stsd":
+                if body_start + 8 <= box_end:
+                    walk(body_start + 8, box_end)
+            elif typ in video_boxes:
+                if result["vcodec"] is None:
+                    result["vcodec"] = typ.decode("ascii")
+                if (
+                    result["width"] is None
+                    and result["height"] is None
+                    and body_start + 28 <= box_end
+                ):
+                    w, h = struct.unpack(">HH", data[body_start + 24 : body_start + 28])
+                    if w > 0 and h > 0:
+                        result["width"] = w
+                        result["height"] = h
+            elif typ in audio_boxes:
+                if result["acodec"] is None:
+                    result["acodec"] = typ.decode("ascii").lower()
+            pos = box_end if pos + size > end else pos + size
+
+    try:
+        walk(0, len(data))
+    except Exception:
+        pass
+    return result
+
+
+def _probe_progressive_mp4_header(url: str, http_headers: dict) -> dict:
+    """Fetches only the first 64 KB of a progressive MP4 to read its moov codec/size."""
+    try:
+        headers = {
+            str(k): str(v)
+            for k, v in (http_headers or {}).items()
+            if str(k).lower() != "range"
+        }
+        headers["Range"] = f"bytes=0-{_MP4_HEADER_PROBE_BYTES - 1}"
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(
+            req, timeout=_MP4_HEADER_PROBE_TIMEOUT_SECS, context=ctx
+        ) as resp:
+            status = getattr(resp, "status", None)
+            if status is None and hasattr(resp, "getcode"):
+                status = resp.getcode()
+            chunk = resp.read(_MP4_HEADER_PROBE_BYTES)
+            filesize = None
+            content_range = resp.headers.get("Content-Range") if resp.headers else None
+            if content_range and "/" in content_range:
+                tail = content_range.rsplit("/", 1)[-1].strip()
+                if tail.isdigit():
+                    filesize = int(tail)
+            if filesize is None and status == 200 and resp.headers:
+                cl = resp.headers.get("Content-Length")
+                if cl and cl.strip().isdigit():
+                    filesize = int(cl.strip())
+        parsed = _parse_mp4_header_metadata(chunk)
+        parsed["filesize"] = filesize
+        return parsed
+    except Exception:
+        return {}
+
+
+def _adapt_instagram_formats_for_android_sdk(
+    sanitized: dict, android_sdk_int: int
+) -> dict:
+    """Avoids VP9/AV1-in-MP4 first-frame playback stalls on Android < 10 (API < 29)."""
+    try:
+        sdk = int(android_sdk_int or 0)
+    except (TypeError, ValueError):
+        sdk = 0
+    if not (0 < sdk < _ANDROID_VP9_MP4_MIN_SDK):
+        return sanitized
+
+    formats = sanitized.get("formats")
+    if not isinstance(formats, list) or not formats:
+        return sanitized
+
+    incompatible_count = sum(
+        1
+        for f in formats
+        if isinstance(f, dict)
+        and _is_legacy_android_incompatible_vcodec(f.get("vcodec"))
+    )
+    if incompatible_count == 0:
+        return sanitized
+
+    has_explicit_avc = any(
+        isinstance(f, dict) and _is_avc_vcodec(f.get("vcodec")) for f in formats
+    )
+    if has_explicit_avc:
+        adapted = dict(sanitized)
+        adapted["formats"] = [
+            copy.deepcopy(f)
+            for f in formats
+            if not (
+                isinstance(f, dict)
+                and _is_legacy_android_incompatible_vcodec(f.get("vcodec"))
+            )
+        ]
+        sys.stderr.write(
+            f"[hyperdl][compat] Android API {sdk} < {_ANDROID_VP9_MP4_MIN_SDK}: "
+            f"filtered {incompatible_count} non-AVC Instagram format(s); "
+            "kept explicit avc1 streams.\n"
+        )
+        return adapted
+
+    progressive_candidates = []
+    for idx, f in enumerate(formats):
+        if not isinstance(f, dict):
+            continue
+        ext = str(f.get("ext") or "").strip().lower()
+        video_ext = str(f.get("video_ext") or "").strip().lower()
+        vcodec = str(f.get("vcodec") or "").strip().lower()
+        acodec = str(f.get("acodec") or "").strip().lower()
+        if (
+            (ext == "mp4" or video_ext == "mp4")
+            and not _is_audio_only_format(f)
+            and vcodec != "none"
+            and acodec != "none"
+            and not _is_legacy_android_incompatible_vcodec(f.get("vcodec"))
+        ):
+            progressive_candidates.append(idx)
+
+    if not progressive_candidates:
+        return sanitized
+
+    top_headers = sanitized.get("http_headers") or {}
+    probed_by_url = {}
+    probed_count = 0
+    for idx in progressive_candidates:
+        if probed_count >= 3:
+            break
+        cand_url = str(formats[idx].get("url") or "").strip()
+        if not (
+            cand_url.startswith("http://") or cand_url.startswith("https://")
+        ):
+            continue
+        if cand_url in probed_by_url:
+            probe = probed_by_url[cand_url]
+        else:
+            merged_headers = dict(top_headers)
+            merged_headers.update(formats[idx].get("http_headers") or {})
+            probe = _probe_progressive_mp4_header(cand_url, merged_headers)
+            probed_by_url[cand_url] = probe
+            probed_count += 1
+        if _is_avc_vcodec(probe.get("vcodec")):
+            break
+
+    accepted_progressive_by_idx = {}
+    chosen_summary = None
+    for idx in progressive_candidates:
+        cand = copy.deepcopy(formats[idx])
+        cand_url = str(cand.get("url") or "").strip()
+        probe = probed_by_url.get(cand_url) or {}
+        pv = probe.get("vcodec")
+        if pv and _is_legacy_android_incompatible_vcodec(pv):
+            continue
+
+        pa = probe.get("acodec")
+        pw = probe.get("width")
+        ph = probe.get("height")
+        psize = probe.get("filesize")
+
+        if psize and not cand.get("filesize"):
+            cand["filesize"] = psize
+        if pw and ph:
+            cand["width"] = pw
+            cand["height"] = ph
+            cand["resolution"] = f"{pw}x{ph}"
+
+        # Never set vcodec without acodec, or Rust would classify it as VideoOnly.
+        if pv and pa:
+            cand["vcodec"] = pv
+            cand["acodec"] = pa
+            cand["audio_ext"] = "mp4"
+        else:
+            if _is_unset_codec(cand.get("vcodec")):
+                cand.pop("vcodec", None)
+            if _is_unset_codec(cand.get("acodec")):
+                cand.pop("acodec", None)
+
+        cand["video_ext"] = "mp4"
+        accepted_progressive_by_idx[idx] = cand
+        if chosen_summary is None:
+            res_str = cand.get("resolution") or "unknown"
+            chosen_summary = f"fmt={cand.get('format_id')} ({pv or 'unknown'}/{res_str})"
+
+    if not accepted_progressive_by_idx:
+        return sanitized
+
+    filtered_formats = []
+    for idx, f in enumerate(formats):
+        if not isinstance(f, dict):
+            continue
+        if _is_audio_only_format(f):
+            filtered_formats.append(copy.deepcopy(f))
+        elif idx in accepted_progressive_by_idx:
+            filtered_formats.append(accepted_progressive_by_idx[idx])
+
+    if not any(not _is_audio_only_format(f) for f in filtered_formats):
+        return sanitized
+
+    sys.stderr.write(
+        f"[hyperdl][compat] Android API {sdk} < {_ANDROID_VP9_MP4_MIN_SDK}: "
+        f"filtered {incompatible_count} non-AVC DASH format(s); selected {chosen_summary}.\n"
+    )
+    adapted = dict(sanitized)
+    adapted["formats"] = filtered_formats
+    return adapted
+
+
 def _inspect_media_dict(
-    url: str, native_lib_dir: str, bin_dir: str, cache_dir: str = ""
+    url: str,
+    native_lib_dir: str,
+    bin_dir: str,
+    cache_dir: str = "",
+    android_sdk_int: int = 0,
 ) -> dict:
     _configure_tls_env()
     bins = ensure_bin_symlinks(native_lib_dir, bin_dir)
@@ -708,7 +991,12 @@ def _inspect_media_dict(
         return {"error": str(last_exc)}
 
     try:
-        raw_json = json.dumps(sanitized)
+        sanitized_for_parse = (
+            _adapt_instagram_formats_for_android_sdk(sanitized, android_sdk_int)
+            if is_instagram
+            else sanitized
+        )
+        raw_json = json.dumps(sanitized_for_parse)
         parsed = _call_rust_str(
             rust_lib, rust_lib.hyperdl_parse_media_inspection_json, raw_json
         )
@@ -761,10 +1049,22 @@ def _inspect_media_dict(
 
 
 def inspect_media(
-    url: str, native_lib_dir: str, bin_dir: str, cache_dir: str = ""
+    url: str,
+    native_lib_dir: str,
+    bin_dir: str,
+    cache_dir: str = "",
+    android_sdk_int: int = 0,
 ) -> str:
     """Inspects a single video URL via yt-dlp + QuickJS and parses via canonical Rust rules."""
-    return json.dumps(_inspect_media_dict(url, native_lib_dir, bin_dir, cache_dir))
+    return json.dumps(
+        _inspect_media_dict(
+            url,
+            native_lib_dir,
+            bin_dir,
+            cache_dir,
+            android_sdk_int=android_sdk_int,
+        )
+    )
 
 
 def _inspect_playlist_dict(
@@ -805,7 +1105,11 @@ def inspect_playlist(
 
 
 def inspect_url(
-    url: str, native_lib_dir: str, bin_dir: str, cache_dir: str = ""
+    url: str,
+    native_lib_dir: str,
+    bin_dir: str,
+    cache_dir: str = "",
+    android_sdk_int: int = 0,
 ) -> str:
     """Classifies URL as SingleVideo or Playlist and runs the matching inspection."""
     _configure_tls_env()
@@ -830,7 +1134,13 @@ def inspect_url(
             }
         )
 
-    vid_res = _inspect_media_dict(normalized, native_lib_dir, bin_dir, cache_dir)
+    vid_res = _inspect_media_dict(
+        normalized,
+        native_lib_dir,
+        bin_dir,
+        cache_dir,
+        android_sdk_int=android_sdk_int,
+    )
     if "error" in vid_res:
         return json.dumps({"error": vid_res["error"]})
     return json.dumps(

@@ -1,11 +1,32 @@
 import json
 import os
+import struct
 import tempfile
 import time
 import unittest
 from unittest import mock
 
 import hyperdl_worker
+
+
+def _box(typ: bytes, payload: bytes) -> bytes:
+    return struct.pack(">I4s", 8 + len(payload), typ) + payload
+
+
+def _build_synthetic_mp4_header(
+    vcodec: bytes = b"avc1", acodec: bytes = b"mp4a", width: int = 720, height: int = 1280
+) -> bytes:
+    ftyp = _box(b"ftyp", b"isom\x00\x00\x02\x00isomiso2mp41")
+    video_entry_body = (b"\x00" * 24) + struct.pack(">HH", width, height) + (b"\x00" * 50)
+    video_stsd = _box(b"stsd", struct.pack(">II", 0, 1) + _box(vcodec, video_entry_body))
+    video_trak = _box(b"trak", _box(b"mdia", _box(b"minf", _box(b"stbl", video_stsd))))
+
+    audio_entry_body = b"\x00" * 28
+    audio_stsd = _box(b"stsd", struct.pack(">II", 0, 1) + _box(acodec, audio_entry_body))
+    audio_trak = _box(b"trak", _box(b"mdia", _box(b"minf", _box(b"stbl", audio_stsd))))
+
+    moov = _box(b"moov", video_trak + audio_trak)
+    return ftyp + moov
 
 
 class _FakeRustLib:
@@ -258,6 +279,308 @@ class HyperdlWorkerInstagramTests(unittest.TestCase):
             )
         self.assertEqual(seen_urls, [("https://www.instagram.com/reel/DTVTvUDj-b1/", 40)])
         self.assertIn("rate-limited", out["error"])
+
+    def test_parse_mp4_header_metadata_extracts_codecs_dimensions_and_handles_truncation(self):
+        avc_header = _build_synthetic_mp4_header(b"avc1", b"mp4a", 720, 1280)
+        self.assertEqual(
+            hyperdl_worker._parse_mp4_header_metadata(avc_header),
+            {"vcodec": "avc1", "acodec": "mp4a", "width": 720, "height": 1280},
+        )
+
+        vp9_header = _build_synthetic_mp4_header(b"vp09", b"mp4a", 1080, 1920)
+        self.assertEqual(
+            hyperdl_worker._parse_mp4_header_metadata(vp9_header)["vcodec"],
+            "vp09",
+        )
+
+        # Truncate moov payload before the end of audio_trak -> video_trak still parses cleanly.
+        truncated = avc_header[:-18]
+        parsed_truncated = hyperdl_worker._parse_mp4_header_metadata(truncated)
+        self.assertEqual(parsed_truncated["vcodec"], "avc1")
+        self.assertEqual(parsed_truncated["width"], 720)
+        self.assertEqual(parsed_truncated["height"], 1280)
+        self.assertEqual(
+            hyperdl_worker._parse_mp4_header_metadata(b"bad"),
+            {"vcodec": None, "acodec": None, "width": None, "height": None},
+        )
+
+    def test_android_9_filters_vp9_instagram_dash_and_probes_progressive_mp4(self):
+        fake_lib = _FakeRustLib()
+        captured_parse_payloads = []
+        raw_reel = {
+            "id": "DTVTvUDj-b1",
+            "title": "Video by rahulmfg",
+            "webpage_url": "https://www.instagram.com/reel/DTVTvUDj-b1/",
+            "extractor_key": "Instagram",
+            "formats": [
+                {
+                    "format_id": "dash-904995479368697a",
+                    "ext": "m4a",
+                    "vcodec": "none",
+                    "acodec": "mp4a.40.5",
+                    "resolution": "audio only",
+                    "protocol": "https",
+                },
+                {
+                    "format_id": "1",
+                    "ext": "mp4",
+                    "video_ext": "mp4",
+                    "audio_ext": "none",
+                    "vcodec": None,
+                    "acodec": None,
+                    "url": "https://cdn.example.com/prog1.mp4",
+                },
+                {
+                    "format_id": "2",
+                    "ext": "mp4",
+                    "video_ext": "mp4",
+                    "audio_ext": "none",
+                    "vcodec": None,
+                    "acodec": None,
+                    "url": "https://cdn.example.com/prog2.mp4",
+                },
+                {
+                    "format_id": "dash-3838628822936334v",
+                    "ext": "mp4",
+                    "vcodec": "vp09.00.40.08",
+                    "acodec": "none",
+                    "width": 1080,
+                    "height": 1920,
+                    "url": "https://cdn.example.com/dash_vp9.mp4",
+                },
+            ],
+        }
+
+        class _FakeYdl:
+            def __init__(self, opts):
+                self.opts = opts
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def extract_info(self, url, download=False):
+                return raw_reel
+
+            def sanitize_info(self, info):
+                return info
+
+        def fake_call_rust(_lib, fn, *args):
+            if fn == fake_lib.hyperdl_classify_url_json:
+                return {
+                    "ok": {
+                        "is_playlist": False,
+                        "normalized_url": "https://www.instagram.com/reel/DTVTvUDj-b1/",
+                        "platform": "InstagramReel",
+                        "shortcode": "DTVTvUDj-b1",
+                    }
+                }
+            if fn == fake_lib.hyperdl_parse_media_inspection_json:
+                parsed_input = json.loads(args[0])
+                captured_parse_payloads.append(parsed_input)
+                return {
+                    "ok": {
+                        "id": "DTVTvUDj-b1",
+                        "video_options": [{"resolution": "720p", "video_format_id": "1"}],
+                        "audio_options": [{"format_id": "dash-904995479368697a"}],
+                    }
+                }
+            return {"error": "unexpected"}
+
+        with mock.patch.object(
+            hyperdl_worker, "_configure_tls_env", return_value="/tmp/cacert.pem"
+        ), mock.patch.object(
+            hyperdl_worker,
+            "ensure_bin_symlinks",
+            return_value={"qjs_native": "/bin/qjs", "ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"},
+        ), mock.patch.object(
+            hyperdl_worker, "_load_rust_lib", return_value=fake_lib
+        ), mock.patch.object(
+            hyperdl_worker, "_call_rust_str", side_effect=fake_call_rust
+        ), mock.patch.object(
+            hyperdl_worker.yt_dlp, "YoutubeDL", _FakeYdl
+        ), mock.patch.object(
+            hyperdl_worker,
+            "_probe_progressive_mp4_header",
+            return_value={
+                "vcodec": "avc1",
+                "acodec": "mp4a",
+                "width": 720,
+                "height": 1280,
+                "filesize": 1514829,
+            },
+        ) as probe_mock:
+            out = hyperdl_worker._inspect_media_dict(
+                "https://www.instagram.com/reel/DTVTvUDj-b1/",
+                "/native",
+                "/bin",
+                "",
+                android_sdk_int=28,
+            )
+
+        self.assertIn("ok", out)
+        # Stops probing after format 1 is confirmed avc1.
+        self.assertEqual(probe_mock.call_count, 1)
+        sent_formats = captured_parse_payloads[0]["formats"]
+        sent_ids = [f["format_id"] for f in sent_formats]
+        self.assertEqual(sent_ids, ["dash-904995479368697a", "1", "2"])
+        fmt1 = next(f for f in sent_formats if f["format_id"] == "1")
+        self.assertEqual(fmt1["vcodec"], "avc1")
+        self.assertEqual(fmt1["acodec"], "mp4a")
+        self.assertEqual(fmt1["width"], 720)
+        self.assertEqual(fmt1["height"], 1280)
+        self.assertEqual(fmt1["resolution"], "720x1280")
+        self.assertEqual(fmt1["filesize"], 1514829)
+        self.assertEqual(fmt1["audio_ext"], "mp4")
+
+        # Original untouched formats (including dash vp09) stay in _RAW_INFO_CACHE.
+        cached = hyperdl_worker._raw_cache_get("https://www.instagram.com/reel/DTVTvUDj-b1/")
+        self.assertIsNotNone(cached)
+        self.assertEqual(
+            [f["format_id"] for f in cached["formats"]],
+            ["dash-904995479368697a", "1", "2", "dash-3838628822936334v"],
+        )
+
+    def test_android_9_probe_failure_or_missing_acodec_keeps_muxed_progressive_classification_safe(self):
+        raw = {
+            "id": "DTVTvUDj-b1",
+            "formats": [
+                {"format_id": "dash-a", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.5", "resolution": "audio only"},
+                {"format_id": "1", "ext": "mp4", "video_ext": "mp4", "audio_ext": "none", "vcodec": "unknown", "acodec": "unknown", "url": "https://cdn.example.com/p1.mp4"},
+                {"format_id": "dash-v", "ext": "mp4", "vcodec": "vp09.00.40.08", "acodec": "none", "width": 1080, "height": 1920},
+            ],
+        }
+        with mock.patch.object(
+            hyperdl_worker,
+            "_probe_progressive_mp4_header",
+            return_value={"vcodec": "avc1", "acodec": None, "width": 720, "height": 1280, "filesize": 12345},
+        ):
+            adapted = hyperdl_worker._adapt_instagram_formats_for_android_sdk(raw, 28)
+
+        self.assertEqual([f["format_id"] for f in adapted["formats"]], ["dash-a", "1"])
+        fmt1 = adapted["formats"][1]
+        self.assertNotIn("vcodec", fmt1)
+        self.assertNotIn("acodec", fmt1)
+        self.assertEqual(fmt1["video_ext"], "mp4")
+        self.assertEqual(fmt1["filesize"], 12345)
+
+        with mock.patch.object(hyperdl_worker, "_probe_progressive_mp4_header", return_value={}):
+            adapted_fail = hyperdl_worker._adapt_instagram_formats_for_android_sdk(raw, 28)
+        self.assertEqual([f["format_id"] for f in adapted_fail["formats"]], ["dash-a", "1"])
+        self.assertNotIn("vcodec", adapted_fail["formats"][1])
+        self.assertNotIn("acodec", adapted_fail["formats"][1])
+
+    def test_android_9_keeps_explicit_avc1_dash_and_handles_vp9_only_fallback(self):
+        avc_dash_reel = {
+            "id": "CDUMkliABpa",
+            "formats": [
+                {"format_id": "dash-a", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2", "resolution": "audio only"},
+                {"format_id": "1", "ext": "mp4", "video_ext": "mp4", "audio_ext": "none", "vcodec": None, "acodec": None},
+                {"format_id": "dash-v720", "ext": "mp4", "vcodec": "avc1.4d401f", "acodec": "none", "width": 720, "height": 1280},
+                {"format_id": "dash-vp9", "ext": "mp4", "vcodec": "vp09.00.40.08", "acodec": "none", "width": 1080, "height": 1920},
+            ],
+        }
+        with mock.patch.object(hyperdl_worker, "_probe_progressive_mp4_header") as probe_mock:
+            adapted = hyperdl_worker._adapt_instagram_formats_for_android_sdk(avc_dash_reel, 28)
+        probe_mock.assert_not_called()
+        self.assertEqual([f["format_id"] for f in adapted["formats"]], ["dash-a", "1", "dash-v720"])
+
+        vp9_only_reel = {
+            "id": "VP9_ONLY",
+            "formats": [
+                {"format_id": "dash-a", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.5", "resolution": "audio only"},
+                {"format_id": "dash-vp9", "ext": "mp4", "vcodec": "vp09.00.40.08", "acodec": "none", "width": 1080, "height": 1920},
+            ],
+        }
+        adapted_only = hyperdl_worker._adapt_instagram_formats_for_android_sdk(vp9_only_reel, 28)
+        self.assertIs(adapted_only, vp9_only_reel)
+
+    def test_android_14_and_default_sdk_and_youtube_leave_vp9_untouched(self):
+        vp9_reel = {
+            "id": "DTVTvUDj-b1",
+            "formats": [
+                {"format_id": "dash-a", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.5", "resolution": "audio only"},
+                {"format_id": "1", "ext": "mp4", "video_ext": "mp4", "audio_ext": "none", "url": "https://cdn.example.com/p1.mp4"},
+                {"format_id": "dash-vp9", "ext": "mp4", "vcodec": "vp09.00.40.08", "acodec": "none", "width": 1080, "height": 1920},
+            ],
+        }
+        with mock.patch.object(hyperdl_worker, "_probe_progressive_mp4_header") as probe_mock:
+            self.assertIs(
+                hyperdl_worker._adapt_instagram_formats_for_android_sdk(vp9_reel, 34),
+                vp9_reel,
+            )
+            self.assertIs(
+                hyperdl_worker._adapt_instagram_formats_for_android_sdk(vp9_reel, 0),
+                vp9_reel,
+            )
+        probe_mock.assert_not_called()
+
+        # YouTube inspection on Android 9 must NOT run Instagram adaptation.
+        fake_lib = _FakeRustLib()
+        seen_formats = []
+
+        class _FakeYtYdl:
+            def __init__(self, opts):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def extract_info(self, url, download=False):
+                return {
+                    "id": "aqz-KE-bpKQ",
+                    "extractor_key": "Youtube",
+                    "formats": [
+                        {"format_id": "248", "ext": "webm", "vcodec": "vp9", "acodec": "none", "width": 1920, "height": 1080},
+                        {"format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2", "resolution": "audio only"},
+                    ],
+                }
+
+            def sanitize_info(self, info):
+                return info
+
+        def fake_call_yt(_lib, fn, *args):
+            if fn == fake_lib.hyperdl_classify_url_json:
+                return {
+                    "ok": {
+                        "is_playlist": False,
+                        "normalized_url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+                        "platform": "YouTube",
+                        "shortcode": None,
+                    }
+                }
+            if fn == fake_lib.hyperdl_parse_media_inspection_json:
+                seen_formats.append([f["format_id"] for f in json.loads(args[0])["formats"]])
+                return {"ok": {"id": "aqz-KE-bpKQ", "video_options": [], "audio_options": []}}
+            return {"error": "unexpected"}
+
+        with mock.patch.object(
+            hyperdl_worker, "_configure_tls_env", return_value="/tmp/cacert.pem"
+        ), mock.patch.object(
+            hyperdl_worker,
+            "ensure_bin_symlinks",
+            return_value={"qjs_native": "/bin/qjs", "ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"},
+        ), mock.patch.object(
+            hyperdl_worker, "_load_rust_lib", return_value=fake_lib
+        ), mock.patch.object(
+            hyperdl_worker, "_call_rust_str", side_effect=fake_call_yt
+        ), mock.patch.object(
+            hyperdl_worker.yt_dlp, "YoutubeDL", _FakeYtYdl
+        ):
+            out = hyperdl_worker._inspect_media_dict(
+                "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+                "/native",
+                "/bin",
+                "",
+                android_sdk_int=28,
+            )
+        self.assertIn("ok", out)
+        self.assertEqual(seen_formats, [["248", "140"]])
 
 
 if __name__ == "__main__":
