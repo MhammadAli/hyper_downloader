@@ -1201,5 +1201,45 @@ void main() {
         expect(find.text('Video by rahulmfg'), findsNothing);
       },
     );
+
+    testWidgets(
+      'displays Android public path cleanly without /storage/emulated/0 prefix',
+      (WidgetTester tester) async {
+        await tester.pumpWidget(
+          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
+        );
+        await tester.pump();
+
+        await tester.enterText(
+          find.byKey(const Key('url_input_field')),
+          'https://www.youtube.com/shorts/aqz-KE-bpKQ',
+        );
+        await tester.tap(find.byKey(const Key('analyze_url_button')));
+        await tester.pumpAndSettle();
+
+        final startButton = find.byKey(const Key('start_download_button'));
+        await tester.ensureVisible(startButton);
+        await tester.tap(startButton);
+        await tester.pump();
+
+        fakeRepo.progressController.add(
+          DownloadProgressEvent(
+            jobId: 'fake-job-1',
+            phase: DownloadPhase.completed,
+            downloadedBytes: BigInt.from(1024),
+            totalBytes: BigInt.from(1024),
+            isTotalEstimated: false,
+            outputPath: '/storage/emulated/0/HyperDownload/Videos/demo.mp4',
+            message: 'Saved to HyperDownload/Videos.',
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final pathFinder = find.byKey(const Key('output_path_text'));
+        await tester.ensureVisible(pathFinder);
+        final pathText = tester.widget<Text>(pathFinder);
+        expect(pathText.data, 'HyperDownload/Videos/demo.mp4');
+      },
+    );
   });
 }

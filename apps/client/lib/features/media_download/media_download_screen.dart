@@ -1367,7 +1367,7 @@ class _DownloadControlsCard extends StatelessWidget {
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
-                                            outputPath,
+                                            _formatDisplayPath(outputPath),
                                             key: const Key('output_path_text'),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
@@ -1557,6 +1557,14 @@ String _formatSpeed(double? speedBytesPerSec) {
 String _formatEta(BigInt? etaSeconds) {
   if (etaSeconds == null) return '--';
   return _formatDuration(etaSeconds.toInt());
+}
+
+String _formatDisplayPath(String path) {
+  const androidPublicPrefix = '/storage/emulated/0/';
+  if (path.startsWith(androidPublicPrefix)) {
+    return path.substring(androidPublicPrefix.length);
+  }
+  return path;
 }
 
 String _resolvePhaseLabel(

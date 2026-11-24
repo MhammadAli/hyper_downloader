@@ -19,6 +19,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
@@ -230,6 +231,92 @@ pub(crate) fn invalidate_cached_instagram_info_json(canonical_url: &str) {
     if let Ok(mut guard) = instagram_info_cache().lock() {
         guard.remove(canonical_url);
     }
+}
+
+const RAW_INSPECT_CACHE_MAX_ENTRIES: usize = 64;
+const RAW_INSPECT_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
+
+struct CachedRawInspection {
+    raw_json: String,
+    cached_at: Instant,
+    last_used: Instant,
+}
+
+fn raw_inspection_cache() -> &'static std::sync::Mutex<HashMap<String, CachedRawInspection>> {
+    static CACHE: OnceLock<std::sync::Mutex<HashMap<String, CachedRawInspection>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+pub(crate) fn cache_raw_inspection_json(url: &str, raw_json: &str) {
+    let key = url.trim().to_string();
+    if key.is_empty() || raw_json.trim().is_empty() {
+        return;
+    }
+    let now = Instant::now();
+    if let Ok(mut guard) = raw_inspection_cache().lock() {
+        guard.retain(|_, v| now.duration_since(v.cached_at) <= RAW_INSPECT_CACHE_TTL);
+        if guard.len() >= RAW_INSPECT_CACHE_MAX_ENTRIES && !guard.contains_key(&key) {
+            if let Some(oldest_key) = guard
+                .iter()
+                .min_by_key(|(_, v)| v.last_used)
+                .map(|(k, _)| k.clone())
+            {
+                guard.remove(&oldest_key);
+            }
+        }
+        guard.insert(
+            key,
+            CachedRawInspection {
+                raw_json: raw_json.to_string(),
+                cached_at: now,
+                last_used: now,
+            },
+        );
+    }
+}
+
+pub(crate) fn get_cached_raw_inspection_json(url: &str) -> Option<String> {
+    let key = url.trim();
+    if key.is_empty() {
+        return None;
+    }
+    let now = Instant::now();
+    let mut guard = raw_inspection_cache().lock().ok()?;
+    if let Some(entry) = guard.get_mut(key) {
+        if now.duration_since(entry.cached_at) <= RAW_INSPECT_CACHE_TTL {
+            entry.last_used = now;
+            return Some(entry.raw_json.clone());
+        }
+    }
+    guard.remove(key);
+    None
+}
+
+pub(crate) fn evict_cached_raw_inspection_json(url: &str) {
+    let key = url.trim();
+    if key.is_empty() {
+        return;
+    }
+    if let Ok(mut guard) = raw_inspection_cache().lock() {
+        guard.remove(key);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn clear_raw_inspection_json_cache() {
+    if let Ok(mut guard) = raw_inspection_cache().lock() {
+        guard.clear();
+    }
+}
+
+pub(crate) async fn write_cached_info_json_temp_file(
+    tag: &str,
+    raw_json: &str,
+) -> Result<PathBuf, EngineError> {
+    let file_path = std::env::temp_dir().join(format!("hyperdl_info_{tag}.json"));
+    tokio::fs::write(&file_path, raw_json.as_bytes()).await?;
+    Ok(file_path)
 }
 
 #[cfg(windows)]
@@ -1022,37 +1109,11 @@ pub fn build_inspect_args(paths: &ToolPaths, url: &str) -> Vec<OsString> {
     ]
 }
 
-/// Builds typed `yt-dlp` download/merge command arguments without shell interpolation.
-pub fn build_download_args(
+fn build_download_common_args(
     paths: &ToolPaths,
     request: &StartDownloadRequest,
     output_template: &str,
-) -> Result<Vec<OsString>, EngineError> {
-    let (mut args, validated_url) = build_common_download_args(paths, request, output_template)?;
-    args.push(OsString::from("--"));
-    args.push(OsString::from(validated_url));
-    Ok(args)
-}
-
-pub(crate) fn build_download_args_from_info_json(
-    paths: &ToolPaths,
-    request: &StartDownloadRequest,
-    output_template: &str,
-    info_json_path: &Path,
-) -> Result<Vec<OsString>, EngineError> {
-    let (mut args, _validated_url) = build_common_download_args(paths, request, output_template)?;
-    args.push(OsString::from("--socket-timeout"));
-    args.push(OsString::from(INSTAGRAM_SOCKET_TIMEOUT_SECS));
-    args.push(OsString::from("--load-info-json"));
-    args.push(info_json_path.as_os_str().to_os_string());
-    Ok(args)
-}
-
-fn build_common_download_args(
-    paths: &ToolPaths,
-    request: &StartDownloadRequest,
-    output_template: &str,
-) -> Result<(Vec<OsString>, String), EngineError> {
+) -> Result<(String, Vec<OsString>), EngineError> {
     let validated_url = validate_media_url(&request.url)?;
     let (format_expr, merge_container) = match request.selection.kind {
         DownloadSelectionKind::Single => {
@@ -1117,8 +1178,38 @@ fn build_common_download_args(
 
     args.push(OsString::from("-o"));
     args.push(OsString::from(output_template));
+    Ok((validated_url, args))
+}
 
-    Ok((args, validated_url))
+/// Builds deterministic `yt-dlp.exe` arguments for single-stream or merged downloads.
+pub fn build_download_args(
+    paths: &ToolPaths,
+    request: &StartDownloadRequest,
+    output_template: &str,
+) -> Result<Vec<OsString>, EngineError> {
+    let (validated_url, mut args) = build_download_common_args(paths, request, output_template)?;
+    args.push(OsString::from("--"));
+    args.push(OsString::from(validated_url));
+    Ok(args)
+}
+
+/// Builds `yt-dlp.exe` arguments that reuse a cached `--load-info-json` inspection file.
+pub fn build_download_args_from_info_json(
+    paths: &ToolPaths,
+    request: &StartDownloadRequest,
+    output_template: &str,
+    info_json_path: &Path,
+) -> Result<Vec<OsString>, EngineError> {
+    let (validated_url, mut args) = build_download_common_args(paths, request, output_template)?;
+    if classify_and_normalize_url(&validated_url)
+        .is_ok_and(|c| c.platform == MediaPlatform::InstagramReel)
+    {
+        args.push(OsString::from("--socket-timeout"));
+        args.push(OsString::from(INSTAGRAM_SOCKET_TIMEOUT_SECS));
+    }
+    args.push(OsString::from("--load-info-json"));
+    args.push(info_json_path.as_os_str().to_os_string());
+    Ok(args)
 }
 
 fn validate_format_id(value: &str, field_name: &str) -> Result<(), EngineError> {
@@ -1667,6 +1758,8 @@ async fn inspect_media_with_paths(
                     inspected.video_options.len(),
                     inspected.audio_options.len()
                 );
+            } else {
+                cache_raw_inspection_json(validated_url, &output.stdout);
             }
             Ok(inspected)
         }
@@ -2077,6 +2170,71 @@ impl DownloadManager {
         Ok(Some(first_live))
     }
 
+    async fn execute_standard_download(
+        &self,
+        ctx: &WorkerLaunchContext,
+        worker_start: std::time::Instant,
+    ) -> Result<Option<DownloadAttemptOutcome>, std::io::Error> {
+        if let Some(cached_raw) = get_cached_raw_inspection_json(&ctx.request.url) {
+            if let Ok(info_path) =
+                write_cached_info_json_temp_file(&ctx.job_id, &cached_raw).await
+            {
+                if let Ok(cached_args) = build_download_args_from_info_json(
+                    &ctx.paths,
+                    &ctx.request,
+                    &ctx.output_template,
+                    &info_path,
+                ) {
+                    let cached_res = self
+                        .run_download_attempt(
+                            &ctx.job_id,
+                            &ctx.paths,
+                            &cached_args,
+                            &ctx.cancel_requested,
+                            &ctx.cancel_notify,
+                            None,
+                            worker_start,
+                        )
+                        .await;
+                    let _ = tokio::fs::remove_file(&info_path).await;
+                    match cached_res {
+                        Ok(attempt)
+                            if attempt.succeeded() || ctx.cancel_requested.load(Ordering::SeqCst) =>
+                        {
+                            return Ok(Some(attempt));
+                        }
+                        Ok(_) => {
+                            evict_cached_raw_inspection_json(&ctx.request.url);
+                            self.emit_analyzing_stage(
+                                &ctx.job_id,
+                                "Cached analysis expired, refreshing video metadata...",
+                            );
+                        }
+                        Err(err) => return Err(err),
+                    }
+                } else {
+                    let _ = tokio::fs::remove_file(&info_path).await;
+                }
+            }
+        }
+
+        if ctx.cancel_requested.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+
+        self.run_download_attempt(
+            &ctx.job_id,
+            &ctx.paths,
+            &ctx.args,
+            &ctx.cancel_requested,
+            &ctx.cancel_notify,
+            None,
+            worker_start,
+        )
+        .await
+        .map(Some)
+    }
+
     async fn run_download_worker(self: Arc<Self>, ctx: WorkerLaunchContext) {
         let worker_start = std::time::Instant::now();
         let job_started = std::time::SystemTime::now();
@@ -2084,17 +2242,7 @@ impl DownloadManager {
         let attempt_res = if ctx.platform == MediaPlatform::InstagramReel {
             self.execute_instagram_download(&ctx, worker_start).await
         } else {
-            self.run_download_attempt(
-                &ctx.job_id,
-                &ctx.paths,
-                &ctx.args,
-                &ctx.cancel_requested,
-                &ctx.cancel_notify,
-                None,
-                worker_start,
-            )
-            .await
-            .map(Some)
+            self.execute_standard_download(&ctx, worker_start).await
         };
 
         let outcome = match attempt_res {
@@ -2459,6 +2607,12 @@ impl DownloadManager {
         }
 
         let wait_result = child.wait().await;
+        {
+            let mut guard = self.job.lock().await;
+            if let Some(state) = guard.as_mut().filter(|s| s.job_id == job_id) {
+                state.process_job = None;
+            }
+        }
         let mut stderr_text = stderr_task.await.unwrap_or_default();
         if timed_out {
             if !stderr_text.is_empty() {
@@ -4158,5 +4312,62 @@ mod tests {
         let streams = ffprobe_streams(&path);
         assert!(streams.iter().any(|s| s["codec_type"] == "video"));
         assert!(streams.iter().any(|s| s["codec_type"] == "audio"));
+    }
+
+    #[test]
+    fn raw_inspection_cache_roundtrip_and_eviction() {
+        clear_raw_inspection_json_cache();
+        let url = "https://www.youtube.com/watch?v=aqz-KE-bpKQ";
+        let payload = r#"{"id":"aqz-KE-bpKQ","title":"BBB"}"#;
+        assert!(get_cached_raw_inspection_json(url).is_none());
+
+        cache_raw_inspection_json(&format!("  {url}  "), payload);
+        assert_eq!(
+            get_cached_raw_inspection_json(url).as_deref(),
+            Some(payload)
+        );
+
+        evict_cached_raw_inspection_json(url);
+        assert!(get_cached_raw_inspection_json(url).is_none());
+    }
+
+    #[test]
+    fn build_download_args_from_info_json_shares_flags_and_passes_info_json() {
+        let paths = ToolPaths {
+            yt_dlp_exe: PathBuf::from("C:/tools/yt-dlp.exe"),
+            node_exe: PathBuf::from("C:/tools/node.exe"),
+            ffmpeg_exe: PathBuf::from("C:/tools/ffmpeg.exe"),
+            default_output_dir: PathBuf::from("C:/downloads"),
+        };
+        let req = StartDownloadRequest {
+            url: "https://www.youtube.com/watch?v=aqz-KE-bpKQ".into(),
+            title: Some("BBB".into()),
+            selection: DownloadFormatSelection::video_and_audio("137", "140", "mp4"),
+            output_directory: None,
+        };
+        let info_path = PathBuf::from("C:/temp/hyperdl_info_job1.json");
+        let args = build_download_args_from_info_json(
+            &paths,
+            &req,
+            "C:/downloads/%(title)s.%(ext)s",
+            &info_path,
+        )
+        .expect("cached info args build");
+
+        let rendered: Vec<String> = args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(rendered.windows(2).any(|w| w == ["-f", "137+140"]));
+        assert!(rendered
+            .windows(2)
+            .any(|w| w == ["--merge-output-format", "mp4"]));
+        assert!(rendered
+            .windows(2)
+            .any(|w| w == ["--load-info-json", "C:/temp/hyperdl_info_job1.json"]));
+        assert!(!rendered.iter().any(|s| s == "--"));
+        assert!(!rendered
+            .iter()
+            .any(|s| s == "https://www.youtube.com/watch?v=aqz-KE-bpKQ"));
     }
 }

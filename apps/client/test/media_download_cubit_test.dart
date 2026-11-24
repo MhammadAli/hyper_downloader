@@ -1154,5 +1154,53 @@ void main() {
         expect(cubit.state.inspectionError, isNull);
       },
     );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'adopts replayed active download event when reattaching without activeJobId',
+      build: () => MediaDownloadCubit(repository: repo),
+      act: (cubit) async {
+        cubit.initialize();
+        progressController.add(
+          DownloadProgressEvent(
+            jobId: 'bg-job-42',
+            phase: DownloadPhase.downloading,
+            downloadedBytes: BigInt.from(512),
+            totalBytes: BigInt.from(1024),
+            isTotalEstimated: false,
+            speedBytesPerSec: 128,
+            etaSeconds: BigInt.from(4),
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+      },
+      verify: (cubit) {
+        expect(cubit.state.activeJobId, 'bg-job-42');
+        expect(cubit.state.latestProgress?.phase, DownloadPhase.downloading);
+        expect(cubit.state.latestProgress?.downloadedBytes, BigInt.from(512));
+      },
+    );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'ignores orphaned terminal progress event when idle',
+      build: () => MediaDownloadCubit(repository: repo),
+      act: (cubit) async {
+        cubit.initialize();
+        progressController.add(
+          DownloadProgressEvent(
+            jobId: 'old-job-9',
+            phase: DownloadPhase.failed,
+            downloadedBytes: BigInt.zero,
+            isTotalEstimated: false,
+            message: 'Old error',
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+      },
+      verify: (cubit) {
+        expect(cubit.state.activeJobId, isNull);
+        expect(cubit.state.latestProgress, isNull);
+        expect(cubit.state.downloadError, isNull);
+      },
+    );
   });
 }

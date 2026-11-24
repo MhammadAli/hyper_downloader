@@ -14,10 +14,12 @@ use crate::models::{
 use crate::selection::{format_bytes_human, format_display_size, select_playlist_item_option};
 use crate::win_job::ProcessTreeJob;
 use crate::yt_dlp::{
-    build_download_args, build_inspect_args, configure_subprocess, extract_thumbnail_url,
-    infer_provider_from_url, json_f64, json_non_empty_str, json_u64, media_subfolder,
-    parse_progress_line, parse_yt_dlp_inspection_json, shared_runtime, validate_media_url,
-    EngineError, ParsedYtDlpLine, ToolPaths,
+    build_download_args, build_download_args_from_info_json, build_inspect_args,
+    cache_raw_inspection_json, configure_subprocess, evict_cached_raw_inspection_json,
+    extract_thumbnail_url, get_cached_raw_inspection_json, infer_provider_from_url, json_f64,
+    json_non_empty_str, json_u64, media_subfolder, parse_progress_line,
+    parse_yt_dlp_inspection_json, shared_runtime, validate_media_url,
+    write_cached_info_json_temp_file, EngineError, ParsedYtDlpLine, ToolPaths,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -617,7 +619,9 @@ impl PlaylistItemExecutor for YtDlpPlaylistExecutor {
             }
 
             let stdout = String::from_utf8_lossy(&output.stdout);
-            parse_yt_dlp_inspection_json(&stdout)
+            let parsed = parse_yt_dlp_inspection_json(&stdout)?;
+            cache_raw_inspection_json(&validated, &stdout);
+            Ok(parsed)
         })
     }
 
@@ -631,16 +635,66 @@ impl PlaylistItemExecutor for YtDlpPlaylistExecutor {
         on_progress: Box<dyn Fn(ItemExecutionProgress) + Send + Sync + 'a>,
     ) -> Pin<Box<dyn Future<Output = Result<String, EngineError>> + Send + 'a>> {
         Box::pin(async move {
-            match run_yt_dlp_download_once(
-                paths,
-                request,
-                output_template,
-                &job_slot,
-                &stop_notify,
-                on_progress.as_ref(),
-            )
-            .await
-            {
+            let first_attempt =
+                if let Some(cached_raw) = get_cached_raw_inspection_json(&request.url) {
+                    let temp_tag = Uuid::new_v4().to_string();
+                    match write_cached_info_json_temp_file(&temp_tag, &cached_raw).await {
+                        Ok(info_path) => {
+                            let cached_res = run_yt_dlp_download_once(
+                                paths,
+                                request,
+                                output_template,
+                                Some(&info_path),
+                                &job_slot,
+                                &stop_notify,
+                                on_progress.as_ref(),
+                            )
+                            .await;
+                            let _ = tokio::fs::remove_file(&info_path).await;
+                            match cached_res {
+                                Ok(path) => return Ok(path),
+                                Err(_) => {
+                                    evict_cached_raw_inspection_json(&request.url);
+                                    run_yt_dlp_download_once(
+                                        paths,
+                                        request,
+                                        output_template,
+                                        None,
+                                        &job_slot,
+                                        &stop_notify,
+                                        on_progress.as_ref(),
+                                    )
+                                    .await
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            run_yt_dlp_download_once(
+                                paths,
+                                request,
+                                output_template,
+                                None,
+                                &job_slot,
+                                &stop_notify,
+                                on_progress.as_ref(),
+                            )
+                            .await
+                        }
+                    }
+                } else {
+                    run_yt_dlp_download_once(
+                        paths,
+                        request,
+                        output_template,
+                        None,
+                        &job_slot,
+                        &stop_notify,
+                        on_progress.as_ref(),
+                    )
+                    .await
+                };
+
+            match first_attempt {
                 Ok(path) => Ok(path),
                 Err(err) if is_transient_http_403(&err) => {
                     tokio::select! {
@@ -653,6 +707,7 @@ impl PlaylistItemExecutor for YtDlpPlaylistExecutor {
                         paths,
                         request,
                         output_template,
+                        None,
                         &job_slot,
                         &stop_notify,
                         on_progress.as_ref(),
@@ -676,11 +731,17 @@ async fn run_yt_dlp_download_once(
     paths: &ToolPaths,
     request: &StartDownloadRequest,
     output_template: &str,
+    cached_info_json_path: Option<&Path>,
     job_slot: &Arc<Mutex<Option<Arc<ProcessTreeJob>>>>,
     stop_notify: &Arc<Notify>,
     on_progress: &(dyn Fn(ItemExecutionProgress) + Send + Sync),
 ) -> Result<String, EngineError> {
-    let args = build_download_args(paths, request, output_template)?;
+    let args = match cached_info_json_path {
+        Some(info_path) => {
+            build_download_args_from_info_json(paths, request, output_template, info_path)?
+        }
+        None => build_download_args(paths, request, output_template)?,
+    };
     let temp_id = Uuid::new_v4().to_string();
     let path_record_file = std::env::temp_dir().join(format!("hyperdl_pl_path_{temp_id}.txt"));
     let _ = tokio::fs::remove_file(&path_record_file).await;

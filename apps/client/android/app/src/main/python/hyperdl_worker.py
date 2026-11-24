@@ -4,7 +4,9 @@ Wraps `yt-dlp`, `yt-dlp-ejs`, `libqjs.so` (QuickJS-NG), `libffmpeg.so`,
 `libffprobe.so`, and the canonical Rust logic inside `libengine_ffi.so`.
 """
 
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import copy
 import ctypes
 import importlib.metadata
 import json
@@ -25,6 +27,9 @@ _RUST_LIB = None
 
 _CACHE_LOCK = threading.Lock()
 _INSPECTION_CACHE = {}
+_RAW_INFO_CACHE = OrderedDict()
+_RAW_INFO_CACHE_MAX = 64
+_RAW_INFO_CACHE_TTL_SECS = 1800.0
 
 _TRACK_LOCK = threading.Lock()
 _CURRENT_JOB = threading.local()
@@ -141,10 +146,10 @@ def _is_estimation_cancelled(estimation_id: str) -> bool:
 def _emit_cb(cb, payload_json: str):
     if cb is None:
         return
-    if callable(cb):
-        cb(payload_json)
-    else:
+    if hasattr(cb, "onEvent"):
         cb.onEvent(payload_json)
+    elif callable(cb):
+        cb(payload_json)
 
 
 def _configure_tls_env() -> str:
@@ -274,6 +279,90 @@ def _cache_get(video_id: str, url: str):
         return None
 
 
+def _raw_cache_keys(url: str, info_dict=None, video_id=None):
+    keys = []
+    norm_url = (url or "").strip()
+    if norm_url:
+        keys.append(f"url:{norm_url}")
+    if info_dict:
+        wp = str(info_dict.get("webpage_url") or "").strip()
+        if wp and wp != norm_url:
+            keys.append(f"url:{wp}")
+        info_id = str(info_dict.get("id") or "").strip()
+        if info_id:
+            keys.append(f"id:{info_id}")
+    if video_id and str(video_id).strip():
+        vid_key = f"id:{str(video_id).strip()}"
+        if vid_key not in keys:
+            keys.append(vid_key)
+    return keys
+
+
+def _raw_cache_put(info_dict: dict, url: str):
+    if not isinstance(info_dict, dict) or not info_dict:
+        return
+    keys = _raw_cache_keys(url, info_dict=info_dict)
+    if not keys:
+        return
+    snapshot = copy.deepcopy(info_dict)
+    stored_at = time.monotonic()
+    with _CACHE_LOCK:
+        for key in keys:
+            _RAW_INFO_CACHE[key] = (stored_at, snapshot)
+            _RAW_INFO_CACHE.move_to_end(key)
+        while len(_RAW_INFO_CACHE) > _RAW_INFO_CACHE_MAX:
+            _RAW_INFO_CACHE.popitem(last=False)
+
+
+def _raw_cache_get(url: str, video_id=None):
+    keys = _raw_cache_keys(url, video_id=video_id)
+    if not keys:
+        return None
+    now = time.monotonic()
+    with _CACHE_LOCK:
+        for key in keys:
+            entry = _RAW_INFO_CACHE.get(key)
+            if entry is None:
+                continue
+            stored_at, snapshot = entry
+            if now - stored_at > _RAW_INFO_CACHE_TTL_SECS:
+                _RAW_INFO_CACHE.pop(key, None)
+                continue
+            _RAW_INFO_CACHE.move_to_end(key)
+            return copy.deepcopy(snapshot)
+    return None
+
+
+def _raw_cache_evict(url: str, video_id=None):
+    keys = _raw_cache_keys(url, video_id=video_id)
+    if not keys:
+        return
+    with _CACHE_LOCK:
+        extra_keys = set(keys)
+        for key in keys:
+            entry = _RAW_INFO_CACHE.get(key)
+            if entry is not None:
+                _, snapshot = entry
+                extra_keys.update(_raw_cache_keys(url, info_dict=snapshot, video_id=video_id))
+        for key in extra_keys:
+            _RAW_INFO_CACHE.pop(key, None)
+
+
+def _prepare_reusable_info(raw_info: dict) -> dict:
+    prepared = copy.deepcopy(raw_info)
+    for ephemeral_key in (
+        "requested_formats",
+        "requested_downloads",
+        "requested_subtitles",
+        "filepath",
+        "_filename",
+        "__files_to_move",
+        "__postprocessors",
+    ):
+        prepared.pop(ephemeral_key, None)
+    return prepared
+
+
 def run_diagnostics(native_lib_dir: str, bin_dir: str) -> str:
     """Executes Phase A runtime verification across Python, yt-dlp, EJS, QuickJS, FFmpeg, FFprobe, and Rust."""
     report = {
@@ -390,6 +479,7 @@ def _inspect_media_dict(
         )
         if "ok" in parsed:
             _cache_put(parsed["ok"], url)
+            _raw_cache_put(sanitized, url)
         return parsed
     except Exception as exc:
         return {"error": str(exc)}
@@ -671,6 +761,7 @@ def _run_download_once(
     bin_dir: str,
     cache_dir: str,
     progress_cb,
+    cached_info=None,
 ) -> dict:
     _ensure_popen_tracker()
     _configure_tls_env()
@@ -810,7 +901,18 @@ def _run_download_once(
     _CURRENT_JOB.job_id = job_id
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url.strip(), download=True)
+            if cached_info is not None:
+                _emit(
+                    "Analyzing",
+                    0,
+                    None,
+                    False,
+                    message="Starting download from cached analysis...",
+                )
+                prepared = _prepare_reusable_info(cached_info)
+                info = ydl.process_ie_result(prepared, download=True)
+            else:
+                info = ydl.extract_info(url.strip(), download=True)
             if info:
                 fp = info.get("filepath")
                 if fp:
@@ -890,6 +992,7 @@ def execute_single_download(
         staging_dir, "%(title).100B [%(id)s] [%(format_id)s].%(ext)s"
     )
 
+    cached_raw = _raw_cache_get(url)
     res = _run_download_once(
         job_id,
         url,
@@ -900,10 +1003,11 @@ def execute_single_download(
         bin_dir,
         cache_dir,
         progress_cb,
+        cached_info=cached_raw,
     )
-    if "error" in res and "HTTP Error 403" in res["error"] and not _is_job_cancelled(job_id):
-        time.sleep(1.5)
-        if not _is_job_cancelled(job_id):
+    if "error" in res and not _is_job_cancelled(job_id):
+        if cached_raw is not None:
+            _raw_cache_evict(url, cached_raw.get("id"))
             res = _run_download_once(
                 job_id,
                 url,
@@ -914,5 +1018,21 @@ def execute_single_download(
                 bin_dir,
                 cache_dir,
                 progress_cb,
+                cached_info=None,
             )
+        if "error" in res and "HTTP Error 403" in res["error"] and not _is_job_cancelled(job_id):
+            time.sleep(1.5)
+            if not _is_job_cancelled(job_id):
+                res = _run_download_once(
+                    job_id,
+                    url,
+                    selection,
+                    staging_dir,
+                    outtmpl,
+                    native_lib_dir,
+                    bin_dir,
+                    cache_dir,
+                    progress_cb,
+                    cached_info=None,
+                )
     return json.dumps(res)

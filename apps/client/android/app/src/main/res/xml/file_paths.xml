@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <external-path name="external_hyperdownload" path="HyperDownload/" />
+    <external-path name="external_movies" path="Movies/" />
+    <external-path name="external_music" path="Music/" />
     <external-path name="external_downloads" path="Download/" />
     <external-files-path name="app_external_downloads" path="Download/" />
     <files-path name="app_files" path="." />

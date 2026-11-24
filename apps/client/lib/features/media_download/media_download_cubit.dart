@@ -857,7 +857,11 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
     if (activeId != null && event.jobId != activeId) {
       return;
     }
-    if (activeId == null && !state.isStartingDownload) {
+    final isActivePhase =
+        event.phase != DownloadPhase.completed &&
+        event.phase != DownloadPhase.failed &&
+        event.phase != DownloadPhase.canceled;
+    if (activeId == null && !state.isStartingDownload && !isActivePhase) {
       return;
     }
 

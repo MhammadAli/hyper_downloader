@@ -6,6 +6,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.annotation.Keep
 import com.chaquo.python.PyObject
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
@@ -17,9 +18,19 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
-fun interface PythonStringCallback {
+@Keep
+interface PythonStringCallback {
+    @Keep
     fun onEvent(json: String)
 }
+
+private inline fun pythonCallback(crossinline handler: (String) -> Unit): PythonStringCallback =
+    object : PythonStringCallback {
+        @Keep
+        override fun onEvent(json: String) {
+            handler(json)
+        }
+    }
 
 data class NotificationSummary(
     val title: String,
@@ -52,6 +63,18 @@ object AndroidDownloadEngine {
 
     @Volatile
     private var sizeEstimateEventEmitter: ((String) -> Unit)? = null
+
+    @Volatile
+    private var latestSingleEventJson: String? = null
+
+    @Volatile
+    private var latestSingleEventPendingDelivery: Boolean = false
+
+    @Volatile
+    private var latestPlaylistEventJson: String? = null
+
+    @Volatile
+    private var latestPlaylistEventPendingDelivery: Boolean = false
 
     private var activeSingleJob: SingleJobRecord? = null
     private var activePlaylistSession: PlaylistRuntimeRecord? = null
@@ -94,10 +117,48 @@ object AndroidDownloadEngine {
 
     fun setDownloadEventEmitter(emitter: ((String) -> Unit)?) {
         downloadEventEmitter = emitter
+        if (emitter != null) {
+            val replay = synchronized(stateLock) {
+                val shouldReplay =
+                    (activeSingleJob?.isRunning == true || latestSingleEventPendingDelivery) &&
+                            latestSingleEventJson != null
+                if (shouldReplay) {
+                    latestSingleEventPendingDelivery = false
+                    latestSingleEventJson
+                } else {
+                    null
+                }
+            }
+            if (replay != null) {
+                mainHandler.post { downloadEventEmitter?.invoke(replay) }
+            }
+        }
     }
 
     fun setPlaylistEventEmitter(emitter: ((String) -> Unit)?) {
         playlistEventEmitter = emitter
+        if (emitter != null) {
+            val replay = synchronized(stateLock) {
+                val runningSnap = activePlaylistSession?.takeIf { it.isRunning }?.snapshot
+                when {
+                    runningSnap != null -> makePlaylistBatchEvent(
+                        runningSnap,
+                        "PlaylistBatchStarted",
+                        "Synced active playlist progress.",
+                    )
+
+                    latestPlaylistEventPendingDelivery && latestPlaylistEventJson != null -> {
+                        latestPlaylistEventPendingDelivery = false
+                        latestPlaylistEventJson
+                    }
+
+                    else -> null
+                }
+            }
+            if (replay != null) {
+                mainHandler.post { playlistEventEmitter?.invoke(replay) }
+            }
+        }
     }
 
     fun setSizeEstimateEventEmitter(emitter: ((String) -> Unit)?) {
@@ -260,7 +321,7 @@ object AndroidDownloadEngine {
 
     private fun launchSingleWorker(appCtx: Context, record: SingleJobRecord) {
         workerExecutor.execute {
-            val cb = PythonStringCallback { eventJson ->
+            val cb = pythonCallback { eventJson ->
                 val obj = runCatching { JSONObject(eventJson) }.getOrNull()
                 if (obj != null) {
                     val phase = obj.optString("phase")
@@ -359,7 +420,12 @@ object AndroidDownloadEngine {
                             put("speed_bytes_per_sec", JSONObject.NULL)
                             put("eta_seconds", 0)
                             put("output_path", exported.displayPath)
-                            put("message", "Saved to Downloads/HyperDownload.")
+                            val folderLabel = if (AndroidMediaStoreExporter.isAudioFileName(safeFileName)) {
+                                "HyperDownload/Audio"
+                            } else {
+                                "HyperDownload/Videos"
+                            }
+                            put("message", "Saved to $folderLabel.")
                         }.toString(),
                     )
                     TransferNotificationManager.clearProgressNotification(appCtx)
@@ -457,7 +523,7 @@ object AndroidDownloadEngine {
         val initialReady = java.util.concurrent.CountDownLatch(1)
         val startedSync = AtomicBoolean(false)
 
-        val cb = PythonStringCallback { estJson ->
+        val cb = pythonCallback { estJson ->
             if (startedSync.compareAndSet(false, true)) {
                 initialResultRef.set(estJson)
                 initialReady.countDown()
@@ -579,14 +645,17 @@ object AndroidDownloadEngine {
         val stagingDir = File(File(stagingBaseDir(appCtx), "playlists"), folderName).apply {
             mkdirs()
         }
-        val displayOutputDir = "/storage/emulated/0/${Environment.DIRECTORY_DOWNLOADS}/HyperDownload/$folderName"
+        val displayOutputDir = AndroidMediaStoreExporter.publicDisplayDir(
+            isAudio = mediaMode == "AudioOnly",
+            subfolder = folderName,
+        )
 
         val previousManifest = File(stagingDir, MANIFEST_FILENAME).takeIf { it.isFile }?.let {
             runCatching { JSONObject(it.readText()) }.getOrNull()
         }
         val reuseCompleted = previousManifest != null &&
-            previousManifest.optString("media_mode") == mediaMode &&
-            previousManifest.optString("quality_cap") == qualityCap
+                previousManifest.optString("media_mode") == mediaMode &&
+                previousManifest.optString("quality_cap") == qualityCap
 
         val itemsArray = JSONArray()
         for (i in 0 until entries.length()) {
@@ -947,10 +1016,10 @@ object AndroidDownloadEngine {
                     put("output_template", outtmpl)
                 }
 
-                val progressCb = PythonStringCallback { evJson ->
-                    val ev = runCatching { JSONObject(evJson) }.getOrNull() ?: return@PythonStringCallback
+                val progressCb = pythonCallback { evJson ->
+                    val ev = runCatching { JSONObject(evJson) }.getOrNull() ?: return@pythonCallback
                     val phase = ev.optString("phase")
-                    if (phase == "Analyzing" || phase == "Canceled" || phase == "Failed") return@PythonStringCallback
+                    if (phase == "Analyzing" || phase == "Canceled" || phase == "Failed") return@pythonCallback
 
                     val isMerging = phase == "Merging"
                     val down = ev.optLong("downloaded_bytes", 0L)
@@ -1092,13 +1161,23 @@ object AndroidDownloadEngine {
 
             val (eventKind, msg) = when (stoppedBy) {
                 "pause" -> "PlaylistPaused" to
-                    "Playlist paused. Completed files preserved; tap Resume to continue."
-                "cancel" -> "PlaylistCanceled" to
-                    "Playlist canceled. Completed files preserved in Downloads/HyperDownload."
+                        "Playlist paused. Completed files preserved; tap Resume to continue."
+
+
+                "cancel" -> {
+                    val folderLabel = if (record.snapshot.optString("media_mode") == "AudioOnly") {
+                        "HyperDownload/Audio"
+                    } else {
+                        "HyperDownload/Videos"
+                    }
+                    "PlaylistCanceled" to
+                            "Playlist canceled. Completed files preserved in $folderLabel."
+                }
+
                 else -> "PlaylistCompleted" to
-                    "Playlist finished: ${record.snapshot.getInt("completed_count")} completed, ${
-                        record.snapshot.getInt("failed_count")
-                    } failed, ${record.snapshot.getInt("skipped_count")} skipped."
+                        "Playlist finished: ${record.snapshot.getInt("completed_count")} completed, ${
+                            record.snapshot.getInt("failed_count")
+                        } failed, ${record.snapshot.getInt("skipped_count")} skipped."
             }
 
             emitPlaylistEvent(makePlaylistBatchEvent(record.snapshot, eventKind, msg))
@@ -1178,6 +1257,7 @@ object AndroidDownloadEngine {
                 "Analyzing", "Ready", "Downloading", "Merging" -> {
                     item.put("status", "Pending")
                 }
+
                 "Completed" -> {
                     val path = item.optString("output_path").takeIf { it.isNotBlank() }
                     if (!AndroidMediaStoreExporter.existsExported(context, path)) {
@@ -1341,6 +1421,18 @@ object AndroidDownloadEngine {
             if (boundForegroundService === service) {
                 boundForegroundService = null
             }
+        }
+    }
+
+    fun hasActiveTransfer(): Boolean {
+        return synchronized(stateLock) {
+            activeSingleJob?.isRunning == true || activePlaylistSession?.isRunning == true
+        }
+    }
+
+    fun isHostedByForegroundService(): Boolean {
+        return synchronized(stateLock) {
+            boundForegroundService != null
         }
     }
 
@@ -1694,12 +1786,24 @@ object AndroidDownloadEngine {
     }
 
     private fun emitDownloadEvent(json: String) {
-        val emitter = downloadEventEmitter ?: return
+        latestSingleEventJson = json
+        val emitter = downloadEventEmitter
+        if (emitter == null) {
+            latestSingleEventPendingDelivery = true
+            return
+        }
+        latestSingleEventPendingDelivery = false
         mainHandler.post { emitter(json) }
     }
 
     private fun emitPlaylistEvent(json: String) {
-        val emitter = playlistEventEmitter ?: return
+        latestPlaylistEventJson = json
+        val emitter = playlistEventEmitter
+        if (emitter == null) {
+            latestPlaylistEventPendingDelivery = true
+            return
+        }
+        latestPlaylistEventPendingDelivery = false
         mainHandler.post { emitter(json) }
     }
 

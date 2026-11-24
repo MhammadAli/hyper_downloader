@@ -14,8 +14,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 
 object TransferNotificationManager {
     const val CHANNEL_PROGRESS_ID = "hyperdl_transfers"
@@ -175,6 +177,18 @@ object HyperDownloadTransferScheduler {
         val appCtx = context.applicationContext
         TransferNotificationManager.ensureChannels(appCtx)
 
+        // Prefer our dedicated ForegroundService across all API levels (26-35) because
+        // JobScheduler constraints can preempt background transfers when leaving the app.
+        val fgsIntent = Intent(appCtx, HyperDownloadForegroundService::class.java)
+        val fgsStarted = runCatching {
+            appCtx.startForegroundService(fgsIntent)
+            true
+        }.getOrDefault(false)
+        if (fgsStarted) {
+            return
+        }
+
+        // Fallback to UIDT JobService on API 34+ only if ForegroundService start was rejected.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             val scheduler = appCtx.getSystemService(JobScheduler::class.java)
             val component = ComponentName(appCtx, HyperDownloadJobService::class.java)
@@ -184,15 +198,8 @@ object HyperDownloadTransferScheduler {
             if (estimatedDownloadBytes != null && estimatedDownloadBytes > 0L) {
                 builder.setEstimatedNetworkBytes(estimatedDownloadBytes, 0L)
             }
-            val result = runCatching { scheduler.schedule(builder.build()) }.getOrNull()
-            if (result == JobScheduler.RESULT_SUCCESS) {
-                return
-            }
+            runCatching { scheduler.schedule(builder.build()) }
         }
-
-        // API 26-33 fallback (and safety net if UIDT cannot be scheduled).
-        val intent = Intent(appCtx, HyperDownloadForegroundService::class.java)
-        runCatching { appCtx.startForegroundService(intent) }
     }
 
     fun cancelScheduledJobs(context: Context) {
@@ -241,8 +248,12 @@ class HyperDownloadJobService : JobService() {
     }
 
     override fun onStopJob(params: JobParameters): Boolean {
-        // System preempted job (e.g., network loss). Pause cleanly; durable checkpoints
-        // are already persisted continuously and do not rely solely on onStopJob().
+        if (AndroidDownloadEngine.isHostedByForegroundService()) {
+            AndroidDownloadEngine.detachJobService(params)
+            return false
+        }
+        // System preempted fallback UIDT job (e.g., network loss). Pause cleanly; durable
+        // checkpoints are persisted continuously and do not rely solely on onStopJob().
         val shouldReschedule = AndroidDownloadEngine.onBackgroundJobStopped(applicationContext)
         AndroidDownloadEngine.detachJobService(params)
         return shouldReschedule
@@ -250,9 +261,63 @@ class HyperDownloadJobService : JobService() {
 }
 
 /**
- * Android 8.0-13 (API 26-33) Foreground Service fallback for background dataSync transfers.
+ * Primary Foreground Service (API 26+) keeping active single/playlist transfers alive with
+ * `PARTIAL_WAKE_LOCK` + high-perf `WifiLock` when the user leaves the app.
  */
 class HyperDownloadForegroundService : Service() {
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+
+    private fun acquireTransferLocks() {
+        val appCtx = applicationContext
+        if (wakeLock == null) {
+            val pm = appCtx.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            wakeLock = pm?.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "${appCtx.packageName}:HyperDownloadTransferWakeLock",
+            )?.apply {
+                setReferenceCounted(false)
+            }
+        }
+        runCatching {
+            if (wakeLock?.isHeld != true) {
+                // Bounded safety timeout (4 hours); released promptly in onDestroy().
+                wakeLock?.acquire(4 * 60 * 60 * 1000L)
+            }
+        }
+
+        if (wifiLock == null) {
+            val wm = appCtx.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            @Suppress("DEPRECATION")
+            wifiLock = wm?.createWifiLock(
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                "${appCtx.packageName}:HyperDownloadTransferWifiLock",
+            )?.apply {
+                setReferenceCounted(false)
+            }
+        }
+        runCatching {
+            if (wifiLock?.isHeld != true) {
+                wifiLock?.acquire()
+            }
+        }
+    }
+
+    private fun releaseTransferLocks() {
+        runCatching {
+            if (wifiLock?.isHeld == true) {
+                wifiLock?.release()
+            }
+        }
+        runCatching {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        }
+        wifiLock = null
+        wakeLock = null
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val appCtx = applicationContext
         val summary = AndroidDownloadEngine.currentNotificationSummary(appCtx)
@@ -275,19 +340,39 @@ class HyperDownloadForegroundService : Service() {
             startForeground(TransferNotificationManager.NOTIFICATION_PROGRESS_ID, notification)
         }
 
+        acquireTransferLocks()
         AndroidDownloadEngine.attachForegroundService(this)
         val activeOrRecovered = AndroidDownloadEngine.ensureBackgroundExecution(appCtx)
         if (!activeOrRecovered) {
+            releaseTransferLocks()
             AndroidDownloadEngine.detachForegroundService(this)
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
+            return START_NOT_STICKY
         }
-        return START_NOT_STICKY
+        return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        val appCtx = applicationContext
+        if (AndroidDownloadEngine.hasActiveTransfer()) {
+            val summary = AndroidDownloadEngine.currentNotificationSummary(appCtx)
+            TransferNotificationManager.updateProgressNotification(
+                context = appCtx,
+                title = summary.title,
+                contentText = summary.subtitle,
+                progressPercent = summary.percent,
+                indeterminate = summary.indeterminate,
+                bigText = summary.bigText,
+            )
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        releaseTransferLocks()
         AndroidDownloadEngine.detachForegroundService(this)
         super.onDestroy()
     }
