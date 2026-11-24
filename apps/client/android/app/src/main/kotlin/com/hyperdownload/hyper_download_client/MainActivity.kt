@@ -396,7 +396,9 @@ class MainActivity : FlutterActivity() {
         }
 
         private fun maybeRunPhaseAProof(intent: Intent?) {
-            if (intent?.getBooleanExtra("phase_a_proof", false) != true) {
+            val isDebuggable =
+                (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            if (!isDebuggable || intent?.getBooleanExtra("phase_a_proof", false) != true) {
                 return
             }
             val testUrl =
@@ -408,15 +410,19 @@ class MainActivity : FlutterActivity() {
                     Log.i(PROOF_TAG, "DIAGNOSTICS_JSON=$diagJson")
 
                     Log.i(PROOF_TAG, "Inspecting authorized test video: $testUrl")
+                    val t0 = System.currentTimeMillis()
                     val inspectJson = AndroidDownloadEngine.inspectMedia(applicationContext, testUrl)
+                    val elapsedMs = System.currentTimeMillis() - t0
                     val envelope = JSONObject(inspectJson)
                     if (envelope.has("ok")) {
                         val ok = envelope.getJSONObject("ok")
                         val summary = JSONObject().apply {
                             put("id", ok.optString("id"))
                             put("title", ok.optString("title"))
+                            put("uploader", ok.opt("uploader"))
                             put("provider_name", ok.optString("provider_name"))
-                            put("duration_seconds", ok.optDouble("duration_seconds"))
+                            put("duration_seconds", ok.opt("duration_seconds"))
+                            put("inspect_elapsed_ms", elapsedMs)
                             put("formats_count", ok.optJSONArray("formats")?.length() ?: 0)
                             put("video_options_count", ok.optJSONArray("video_options")?.length() ?: 0)
                             put("audio_options_count", ok.optJSONArray("audio_options")?.length() ?: 0)

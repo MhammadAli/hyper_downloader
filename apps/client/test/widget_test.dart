@@ -1241,5 +1241,62 @@ void main() {
         expect(pathText.data, 'HyperDownload/Videos/demo.mp4');
       },
     );
+
+    testWidgets(
+      'warm-start shared Instagram Reel replaces previous YouTube URL and shows Instagram analysis status',
+      (WidgetTester tester) async {
+        final completer = Completer<UrlInspectionResult>();
+        final sharedController = StreamController<String>.broadcast();
+        addTearDown(sharedController.close);
+
+        await tester.pumpWidget(
+          HyperDownloadApp(
+            repository: fakeRepo,
+            fileLauncher: fakeLauncher,
+            sharedUrls: sharedController.stream,
+          ),
+        );
+        await tester.pump();
+
+        await tester.enterText(
+          find.byKey(const Key('url_input_field')),
+          'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+        );
+        await tester.pump();
+
+        fakeRepo.inspectCompleter = completer;
+        sharedController.add('https://www.instagram.com/reel/DTVTvUDj-b1/');
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+
+        final field = tester.widget<TextField>(
+          find.byKey(const Key('url_input_field')),
+        );
+        expect(
+          field.controller?.text,
+          'https://www.instagram.com/reel/DTVTvUDj-b1/',
+        );
+        expect(
+          find.text(
+            'Connecting to Instagram and checking available formats...',
+          ),
+          findsOneWidget,
+        );
+
+        fakeRepo.returnProgressiveInstagramReel = true;
+        fakeRepo.inspectCompleter = null;
+        final resolved = await fakeRepo.inspectMedia(
+          'https://www.instagram.com/reel/DTVTvUDj-b1/',
+        );
+        completer.complete(
+          UrlInspectionResult(
+            kind: InspectionTargetKind.singleVideo,
+            video: resolved,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Instagram'), findsOneWidget);
+      },
+    );
   });
 }

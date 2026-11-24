@@ -162,7 +162,17 @@ class _MediaDownloadScreenState extends State<MediaDownloadScreen> {
             ],
           ),
         ),
-        child: BlocBuilder<MediaDownloadCubit, MediaDownloadState>(
+        child: BlocConsumer<MediaDownloadCubit, MediaDownloadState>(
+          listenWhen: (previous, current) =>
+              previous.urlInput != current.urlInput,
+          listener: (context, state) {
+            if (_urlController.text != state.urlInput) {
+              _urlController.text = state.urlInput;
+              _urlController.selection = TextSelection.fromPosition(
+                TextPosition(offset: state.urlInput.length),
+              );
+            }
+          },
           builder: (context, state) {
             if (_urlController.text != state.urlInput &&
                 state.urlInput.isNotEmpty &&
@@ -188,6 +198,7 @@ class _MediaDownloadScreenState extends State<MediaDownloadScreen> {
                       _AnimatedEntrance(
                         child: _UrlInputCard(
                           controller: _urlController,
+                          urlInput: state.urlInput,
                           hasUrlText: state.urlInput.isNotEmpty,
                           isAnalyzing:
                               state.inspectionStatus ==
@@ -332,6 +343,7 @@ class _AnimatedEntrance extends StatelessWidget {
 
 class _UrlInputCard extends StatelessWidget {
   final TextEditingController controller;
+  final String urlInput;
   final bool hasUrlText;
   final bool isAnalyzing;
   final ValueChanged<String> onUrlChanged;
@@ -342,6 +354,7 @@ class _UrlInputCard extends StatelessWidget {
 
   const _UrlInputCard({
     required this.controller,
+    required this.urlInput,
     required this.hasUrlText,
     required this.isAnalyzing,
     required this.onUrlChanged,
@@ -355,7 +368,10 @@ class _UrlInputCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final isInstagram = MediaDownloadCubit.isInstagramUrl(controller.text);
+    final effectiveUrl = controller.text.isNotEmpty
+        ? controller.text
+        : urlInput;
+    final isInstagram = MediaDownloadCubit.isInstagramUrl(effectiveUrl);
     final analysisStatusText = isInstagram
         ? 'Connecting to Instagram and checking available formats...'
         : 'Analyzing link and discovering available qualities...';
@@ -372,12 +388,9 @@ class _UrlInputCard extends StatelessWidget {
               onChanged: onUrlChanged,
               onSubmitted: (_) => onAnalyze(),
               decoration: InputDecoration(
-                labelText: Platform.isAndroid
-                    ? 'Paste video, Shorts, or playlist link'
-                    : 'Paste YouTube or Instagram Reel link',
-                hintText: Platform.isAndroid
-                    ? 'https://www.youtube.com/watch?v=... or playlist?list=...'
-                    : 'YouTube video, Shorts, playlist, or Instagram Reel URL',
+                labelText: 'Paste YouTube or Instagram Reel link',
+                hintText:
+                    'YouTube video, Shorts, playlist, or Instagram Reel URL',
                 prefixIcon: Icon(Icons.link_rounded, color: scheme.secondary),
                 suffixIcon: hasUrlText && !isAnalyzing
                     ? IconButton(

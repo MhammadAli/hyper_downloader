@@ -104,14 +104,6 @@ fn classify_instagram_url(parsed: &Url) -> Result<NormalizedMediaUrl, EngineErro
             ));
         }
 
-        #[cfg(target_os = "android")]
-        {
-            return Err(EngineError::InvalidRequest(
-                "Instagram Reels are currently supported on Windows only.".into(),
-            ));
-        }
-
-        #[cfg(not(target_os = "android"))]
         return Ok(NormalizedMediaUrl {
             platform: MediaPlatform::InstagramReel,
             normalized_url: format!("https://www.instagram.com/reel/{code}/"),

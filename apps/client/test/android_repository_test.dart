@@ -132,6 +132,87 @@ void main() {
     );
 
     test(
+      'decodes Instagram Reel MediaInspection with portrait qualities and Audio included automatically',
+      () {
+        final json = <String, dynamic>{
+          'id': 'DTVTvUDj-b1',
+          'title': 'Video by rahulmfg',
+          'uploader': 'Rahul',
+          'duration_seconds': null,
+          'thumbnail_url': 'https://instagram.example.com/cover.jpg',
+          'webpage_url': 'https://www.instagram.com/reel/DTVTvUDj-b1/',
+          'provider_name': 'Instagram',
+          'original_audio': {
+            'language': null,
+            'language_display_name': null,
+            'is_original': null,
+            'is_default': null,
+            'is_auto_dub': null,
+            'selection_confidence': 'SingleOrUnmarked',
+            'status_note': 'Audio included automatically',
+          },
+          'video_options': [
+            {
+              'resolution': '1080p',
+              'height': 1080,
+              'fps': null,
+              'container': 'mp4',
+              'display_size': 'Unknown size',
+              'file_size_bytes': null,
+              'size_accuracy': 'Unknown',
+              'video_format_id': 'dash-1080v',
+              'selected_audio_format_id': 'dash-a',
+              'audio_language': {
+                'language': null,
+                'language_display_name': null,
+                'is_original': null,
+                'is_default': null,
+                'is_auto_dub': null,
+                'selection_confidence': 'SingleOrUnmarked',
+                'status_note': 'Audio included automatically',
+              },
+              'format_selection_strategy': 'PairVideoAndAudioWithFfmpeg',
+            },
+          ],
+          'audio_options': [
+            {
+              'quality_label': 'Compact Quality (68 kbps)',
+              'container': 'm4a',
+              'bitrate_kbps': 68.0,
+              'display_size': 'Unknown size',
+              'file_size_bytes': null,
+              'size_accuracy': 'Unknown',
+              'format_id': 'dash-a',
+              'audio_language': {
+                'language': null,
+                'language_display_name': null,
+                'is_original': null,
+                'is_default': null,
+                'is_auto_dub': null,
+                'selection_confidence': 'SingleOrUnmarked',
+                'status_note': 'Audio included automatically',
+              },
+            },
+          ],
+          'formats': const [],
+        };
+
+        final inspection = AndroidEngineJsonCodec.mediaInspectionFromJson(json);
+        expect(inspection.providerName, 'Instagram');
+        expect(
+          inspection.originalAudio?.statusNote,
+          'Audio included automatically',
+        );
+        expect(inspection.videoOptions.single.resolution, '1080p');
+        expect(
+          inspection.videoOptions.single.formatSelectionStrategy,
+          FormatSelectionStrategy.pairVideoAndAudioWithFfmpeg,
+        );
+        expect(inspection.audioOptions.single.formatId, 'dash-a');
+      },
+    );
+
+    test(
       'decodes playlist inspection, snapshot, progress, and size estimate',
       () {
         final urlResult = AndroidEngineJsonCodec.urlInspectionResultFromJson({

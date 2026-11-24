@@ -12,6 +12,7 @@ import importlib.metadata
 import json
 import math
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -30,6 +31,8 @@ _INSPECTION_CACHE = {}
 _RAW_INFO_CACHE = OrderedDict()
 _RAW_INFO_CACHE_MAX = 64
 _RAW_INFO_CACHE_TTL_SECS = 1800.0
+_INSTAGRAM_RAW_INFO_CACHE_TTL_SECS = 900.0
+_INSTAGRAM_SOCKET_TIMEOUT_SECS = 40
 
 _TRACK_LOCK = threading.Lock()
 _CURRENT_JOB = threading.local()
@@ -225,6 +228,10 @@ def _load_rust_lib(native_lib_dir: str):
         lib.hyperdl_classify_url_json.argtypes = [ctypes.c_char_p]
         lib.hyperdl_classify_url_json.restype = ctypes.c_void_p
 
+        if hasattr(lib, "hyperdl_classify_instagram_error_json"):
+            lib.hyperdl_classify_instagram_error_json.argtypes = [ctypes.c_char_p]
+            lib.hyperdl_classify_instagram_error_json.restype = ctypes.c_void_p
+
         lib.hyperdl_free_string.argtypes = [ctypes.c_void_p]
         lib.hyperdl_free_string.restype = None
 
@@ -298,17 +305,26 @@ def _raw_cache_keys(url: str, info_dict=None, video_id=None):
     return keys
 
 
-def _raw_cache_put(info_dict: dict, url: str):
+def _raw_cache_put(
+    info_dict: dict,
+    url: str,
+    extra_urls=None,
+    ttl_secs: float = _RAW_INFO_CACHE_TTL_SECS,
+):
     if not isinstance(info_dict, dict) or not info_dict:
         return
     keys = _raw_cache_keys(url, info_dict=info_dict)
+    for extra in extra_urls or ():
+        for k in _raw_cache_keys(extra, info_dict=info_dict):
+            if k not in keys:
+                keys.append(k)
     if not keys:
         return
     snapshot = copy.deepcopy(info_dict)
     stored_at = time.monotonic()
     with _CACHE_LOCK:
         for key in keys:
-            _RAW_INFO_CACHE[key] = (stored_at, snapshot)
+            _RAW_INFO_CACHE[key] = (stored_at, float(ttl_secs), snapshot)
             _RAW_INFO_CACHE.move_to_end(key)
         while len(_RAW_INFO_CACHE) > _RAW_INFO_CACHE_MAX:
             _RAW_INFO_CACHE.popitem(last=False)
@@ -324,8 +340,8 @@ def _raw_cache_get(url: str, video_id=None):
             entry = _RAW_INFO_CACHE.get(key)
             if entry is None:
                 continue
-            stored_at, snapshot = entry
-            if now - stored_at > _RAW_INFO_CACHE_TTL_SECS:
+            stored_at, ttl_secs, snapshot = entry
+            if now - stored_at > ttl_secs:
                 _RAW_INFO_CACHE.pop(key, None)
                 continue
             _RAW_INFO_CACHE.move_to_end(key)
@@ -342,7 +358,7 @@ def _raw_cache_evict(url: str, video_id=None):
         for key in keys:
             entry = _RAW_INFO_CACHE.get(key)
             if entry is not None:
-                _, snapshot = entry
+                _, _, snapshot = entry
                 extra_keys.update(_raw_cache_keys(url, info_dict=snapshot, video_id=video_id))
         for key in extra_keys:
             _RAW_INFO_CACHE.pop(key, None)
@@ -356,11 +372,121 @@ def _prepare_reusable_info(raw_info: dict) -> dict:
         "requested_subtitles",
         "filepath",
         "_filename",
+        "filename",
+        "format_id",
+        "format",
+        "ext",
         "__files_to_move",
         "__postprocessors",
     ):
         prepared.pop(ephemeral_key, None)
     return prepared
+
+
+def _classify_instagram_error(rust_lib, raw_error: str) -> dict:
+    text = str(raw_error or "").strip()
+    if rust_lib is not None and hasattr(rust_lib, "hyperdl_classify_instagram_error_json"):
+        try:
+            res = _call_rust_str(
+                rust_lib, rust_lib.hyperdl_classify_instagram_error_json, text
+            )
+            if "ok" in res and isinstance(res["ok"], dict):
+                return res["ok"]
+        except Exception:
+            pass
+    lower = text.lower()
+    if any(t in lower for t in ("429", "too many requests", "rate limit", "rate-limit")):
+        msg = "Instagram temporarily rate-limited requests. Please wait a few minutes and try again."
+    elif any(t in lower for t in ("404", "not found", "does not exist", "deleted", "removed")):
+        msg = "This Instagram Reel is unavailable or has been deleted."
+    elif any(t in lower for t in ("account is private", "private reel", "private video")):
+        msg = "This Instagram Reel is private or inaccessible."
+    elif any(t in lower for t in ("login required", "logged-in", "sign in", "cookies")):
+        msg = "Instagram requires login to view this Reel. Only public Reels are supported without login."
+    elif any(t in lower for t in ("ffmpeg", "ffprobe", "postprocessing", "muxing")):
+        msg = "Failed to process video and audio streams with FFmpeg."
+    elif any(t in lower for t in ("timed out", "timeout", "urlopen", "gaierror", "ssl", "dns")):
+        msg = "Network error while contacting Instagram. Check your internet connection and try again."
+    else:
+        msg = "Instagram extraction failed. Please verify the Reel is public and try again."
+    return {
+        "user_message": msg,
+        "redacted_diagnostic": text[:240],
+        "is_transient": any(t in lower for t in ("timed out", "timeout", "urlopen", "gaierror", "reset")),
+    }
+
+
+class _QuietCaptureLogger:
+    """Per-job yt-dlp logger that captures warnings/errors without touching global state."""
+
+    def __init__(self):
+        self.messages = []
+
+    def debug(self, msg):
+        pass
+
+    def info(self, msg):
+        pass
+
+    def warning(self, msg):
+        if msg:
+            self.messages.append(str(msg))
+
+    def error(self, msg):
+        if msg:
+            self.messages.append(str(msg))
+
+
+class _WorkerJobLogger:
+    """Per-job yt-dlp logger providing instant pre-first-byte cancel and stage status updates."""
+
+    def __init__(self, job_id: str, is_instagram: bool, on_stage):
+        self.job_id = job_id
+        self.is_instagram = is_instagram
+        self.on_stage = on_stage
+        self.messages = []
+
+    def _check_cancel(self):
+        if _is_job_cancelled(self.job_id):
+            raise yt_dlp.utils.DownloadCancelled("Canceled by user")
+
+    def _handle_line(self, msg):
+        self._check_cancel()
+        line = str(msg or "").strip()
+        if not line:
+            return
+        if line.startswith("[Instagram] Setting up session"):
+            self.on_stage("Connecting to Instagram...")
+        elif line.startswith("[Instagram] "):
+            self.on_stage("Resolving media...")
+        elif line.startswith("[info] ") and "Downloading" in line and "format(s)" in line:
+            self.on_stage("Resolving media...")
+        elif line.startswith("[download] Destination: "):
+            self.on_stage("Starting download...")
+
+    def debug(self, msg):
+        self._handle_line(msg)
+
+    def info(self, msg):
+        self._handle_line(msg)
+
+    def warning(self, msg):
+        self._check_cancel()
+        if msg:
+            self.messages.append(str(msg))
+
+    def error(self, msg):
+        self._check_cancel()
+        if msg:
+            self.messages.append(str(msg))
+
+
+def _sleep_cancelable(job_id: str, seconds: float):
+    deadline = time.monotonic() + max(0.0, seconds)
+    while time.monotonic() < deadline:
+        if _is_job_cancelled(job_id):
+            return
+        time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
 
 
 def run_diagnostics(native_lib_dir: str, bin_dir: str) -> str:
@@ -379,6 +505,15 @@ def run_diagnostics(native_lib_dir: str, bin_dir: str) -> str:
         "ffprobe_ok": False,
         "ffprobe_version": None,
         "rust_c_api_ok": False,
+        "rust_instagram_classify_ok": False,
+        "curl_cffi_available": False,
+        "curl_cffi_version": None,
+        "request_handlers": [],
+        "impersonate_handlers": [],
+        "instagram_extractor_available": False,
+        "android_dns_ok": False,
+        "android_dns_ms": None,
+        "android_dns_count": 0,
         "error": None,
     }
     try:
@@ -449,6 +584,62 @@ def run_diagnostics(native_lib_dir: str, bin_dir: str) -> str:
         if not report["rust_c_api_ok"]:
             raise RuntimeError(f"Rust C-ABI check failed: {cls_res}")
 
+        ig_cls_res = _call_rust_str(
+            rust_lib,
+            rust_lib.hyperdl_classify_url_json,
+            "https://m.instagram.com/reels/DTVTvUDj-b1/?igsh=test",
+        )
+        report["rust_instagram_classify_ok"] = (
+            "ok" in ig_cls_res
+            and ig_cls_res["ok"].get("platform") == "InstagramReel"
+            and ig_cls_res["ok"].get("shortcode") == "DTVTvUDj-b1"
+            and ig_cls_res["ok"].get("is_playlist") is False
+        )
+
+        try:
+            import curl_cffi  # type: ignore
+
+            report["curl_cffi_available"] = True
+            report["curl_cffi_version"] = getattr(curl_cffi, "__version__", "unknown")
+        except Exception:
+            report["curl_cffi_available"] = False
+
+        try:
+            from yt_dlp.networking.impersonate import ImpersonateRequestHandler
+
+            with yt_dlp.YoutubeDL(
+                {"quiet": True, "no_warnings": True, "ignoreconfig": True}
+            ) as probe_ydl:
+                handlers = probe_ydl._request_director.handlers
+                report["request_handlers"] = [
+                    f"{k}:{type(h).__name__}" for k, h in handlers.items()
+                ]
+                report["impersonate_handlers"] = [
+                    f"{k}:{type(h).__name__}"
+                    for k, h in handlers.items()
+                    if isinstance(h, ImpersonateRequestHandler)
+                ]
+        except Exception:
+            pass
+
+        try:
+            from yt_dlp.extractor import InstagramIE  # noqa: F401
+
+            report["instagram_extractor_available"] = True
+        except Exception:
+            report["instagram_extractor_available"] = False
+
+        try:
+            dns_t0 = time.monotonic()
+            infos = socket.getaddrinfo(
+                "www.instagram.com", 443, type=socket.SOCK_STREAM
+            )
+            report["android_dns_ms"] = round((time.monotonic() - dns_t0) * 1000.0, 2)
+            report["android_dns_count"] = len(infos)
+            report["android_dns_ok"] = len(infos) > 0
+        except Exception:
+            report["android_dns_ok"] = False
+
         report["ok"] = True
     except Exception as exc:
         report["error"] = str(exc)
@@ -467,21 +658,105 @@ def _inspect_media_dict(
     if "error" in cls_res:
         return {"error": cls_res["error"]}
 
+    normalized_url = cls_res["ok"].get("normalized_url") or url.strip()
+    is_instagram = cls_res["ok"].get("platform") == "InstagramReel"
+
     ydl_opts = _base_ydl_opts(bins, bin_dir, cache_dir)
     ydl_opts["noplaylist"] = True
+    capture_logger = None
+    if is_instagram:
+        ydl_opts["socket_timeout"] = _INSTAGRAM_SOCKET_TIMEOUT_SECS
+        capture_logger = _QuietCaptureLogger()
+        ydl_opts["logger"] = capture_logger
+
+    t0 = time.monotonic()
+    last_exc = None
+    sanitized = None
+    max_attempts = 2 if is_instagram else 1
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(normalized_url, download=False)
+                sanitized = ydl.sanitize_info(info)
+            last_exc = None
+            break
+        except Exception as exc:
+            last_exc = exc
+            if is_instagram and attempt < max_attempts:
+                combined_err = "\n".join(
+                    (capture_logger.messages if capture_logger else []) + [str(exc)]
+                )
+                classified_err = _classify_instagram_error(rust_lib, combined_err)
+                if classified_err.get("is_transient"):
+                    if capture_logger:
+                        capture_logger.messages.clear()
+                    time.sleep(1.5)
+                    continue
+            break
+
+    if last_exc is not None:
+        if is_instagram:
+            combined_err = "\n".join(
+                (capture_logger.messages if capture_logger else []) + [str(last_exc)]
+            )
+            classified_err = _classify_instagram_error(rust_lib, combined_err)
+            sys.stderr.write(
+                f"[hyperdl][diag] Android Instagram inspection failed ({time.monotonic() - t0:.2f}s): "
+                f"{classified_err.get('redacted_diagnostic', '')}\n"
+            )
+            return {"error": classified_err["user_message"]}
+        return {"error": str(last_exc)}
+
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url.strip(), download=False)
-            sanitized = ydl.sanitize_info(info)
         raw_json = json.dumps(sanitized)
         parsed = _call_rust_str(
             rust_lib, rust_lib.hyperdl_parse_media_inspection_json, raw_json
         )
         if "ok" in parsed:
-            _cache_put(parsed["ok"], url)
-            _raw_cache_put(sanitized, url)
+            _cache_put(parsed["ok"], normalized_url)
+            if normalized_url != url.strip():
+                _cache_put(parsed["ok"], url)
+            ttl = (
+                _INSTAGRAM_RAW_INFO_CACHE_TTL_SECS
+                if is_instagram
+                else _RAW_INFO_CACHE_TTL_SECS
+            )
+            _raw_cache_put(
+                sanitized,
+                normalized_url,
+                extra_urls=[url] if normalized_url != url.strip() else None,
+                ttl_secs=ttl,
+            )
+            if is_instagram:
+                insp = parsed["ok"]
+                sys.stderr.write(
+                    f"[hyperdl][timing] android instagram inspect complete: total={time.monotonic() - t0:.2f}s "
+                    f"video_options={len(insp.get('video_options') or [])} "
+                    f"audio_options={len(insp.get('audio_options') or [])}\n"
+                )
+        elif is_instagram and "error" in parsed:
+            err_msg = str(parsed["error"])
+            if not any(
+                k in err_msg.lower()
+                for k in ("carousel", "unsupported", "not supported", "private")
+            ):
+                classified_err = _classify_instagram_error(rust_lib, err_msg)
+                sys.stderr.write(
+                    f"[hyperdl][diag] Android Instagram metadata parse failed: "
+                    f"{classified_err.get('redacted_diagnostic', '')}\n"
+                )
+                return {
+                    "error": "Instagram returned an unsupported media format or incomplete response."
+                }
         return parsed
     except Exception as exc:
+        if is_instagram:
+            classified_err = _classify_instagram_error(rust_lib, str(exc))
+            sys.stderr.write(
+                f"[hyperdl][diag] Android Instagram inspection error: "
+                f"{classified_err.get('redacted_diagnostic', '')}\n"
+            )
+            return {"error": classified_err["user_message"]}
         return {"error": str(exc)}
 
 
@@ -762,6 +1037,7 @@ def _run_download_once(
     cache_dir: str,
     progress_cb,
     cached_info=None,
+    is_instagram: bool = False,
 ) -> dict:
     _ensure_popen_tracker()
     _configure_tls_env()
@@ -778,6 +1054,8 @@ def _run_download_once(
         "last_emit_ts": 0.0,
         "detected_paths": [],
         "phase": "Analyzing",
+        "received_first_byte": False,
+        "last_stage_msg": None,
     }
 
     def _emit(
@@ -810,6 +1088,21 @@ def _run_download_once(
         }
         _emit_cb(progress_cb, json.dumps(payload))
 
+    def _emit_stage(message: str):
+        if state["received_first_byte"]:
+            return
+        if state["last_stage_msg"] == message:
+            return
+        state["last_stage_msg"] = message
+        state["phase"] = "Analyzing"
+        _emit(
+            "Analyzing",
+            0,
+            state["last_total"],
+            state["last_estimated"],
+            message=message,
+        )
+
     def _progress_hook(d: dict):
         if _is_job_cancelled(job_id):
             raise yt_dlp.utils.DownloadCancelled("Canceled by user")
@@ -824,31 +1117,47 @@ def _run_download_once(
         elif est_total is not None:
             state["last_total"] = int(est_total)
             state["last_estimated"] = True
-        state["last_downloaded"] = downloaded
 
         fn = d.get("filename") or (d.get("info_dict") or {}).get("filepath")
         if fn:
             state["detected_paths"].append(fn)
 
+        if downloaded == 0 and status != "finished":
+            if status == "downloading":
+                _emit_stage("Connecting to media server...")
+            return
+
+        effective_downloaded = (
+            downloaded
+            if downloaded > 0
+            else (state["last_total"] if state["last_total"] is not None else state["last_downloaded"])
+        )
+        state["last_downloaded"] = effective_downloaded
+
         if status == "downloading":
             now = time.monotonic()
-            if now - state["last_emit_ts"] < 0.15:
+            is_first_byte = not state["received_first_byte"]
+            if is_first_byte:
+                state["received_first_byte"] = True
+            elif now - state["last_emit_ts"] < 0.15:
                 return
             state["last_emit_ts"] = now
             state["phase"] = "Downloading"
             _emit(
                 "Downloading",
-                downloaded,
+                effective_downloaded,
                 state["last_total"],
                 state["last_estimated"],
                 speed=d.get("speed"),
                 eta=d.get("eta"),
             )
         elif status == "finished":
+            if not state["received_first_byte"] and effective_downloaded > 0:
+                state["received_first_byte"] = True
             state["phase"] = "Downloading"
             _emit(
                 "Downloading",
-                downloaded,
+                effective_downloaded,
                 state["last_total"],
                 state["last_estimated"],
                 message="Stream downloaded, preparing next step...",
@@ -873,6 +1182,7 @@ def _run_download_once(
                 message=f"Running {pp} with FFmpeg...",
             )
 
+    job_logger = _WorkerJobLogger(job_id, is_instagram, _emit_stage)
     ydl_opts = _base_ydl_opts(bins, bin_dir, cache_dir)
     ydl_opts.update(
         {
@@ -884,31 +1194,27 @@ def _run_download_once(
             "outtmpl": outtmpl,
             "progress_hooks": [_progress_hook],
             "postprocessor_hooks": [_postprocessor_hook],
+            "logger": job_logger,
         }
     )
+    if is_instagram:
+        ydl_opts["socket_timeout"] = _INSTAGRAM_SOCKET_TIMEOUT_SECS
     if merge_container:
         ydl_opts["merge_output_format"] = merge_container
 
-    _emit(
-        "Analyzing",
-        0,
-        None,
-        False,
-        message="Preparing yt-dlp download...",
-    )
+    if cached_info is None:
+        _emit_stage(
+            "Connecting to Instagram..."
+            if is_instagram
+            else "Preparing yt-dlp download..."
+        )
 
     prev_job = getattr(_CURRENT_JOB, "job_id", None)
     _CURRENT_JOB.job_id = job_id
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             if cached_info is not None:
-                _emit(
-                    "Analyzing",
-                    0,
-                    None,
-                    False,
-                    message="Starting download from cached analysis...",
-                )
+                _emit_stage("Starting download from cached analysis...")
                 prepared = _prepare_reusable_info(cached_info)
                 info = ydl.process_ie_result(prepared, download=True)
             else:
@@ -926,6 +1232,7 @@ def _run_download_once(
                 except Exception:
                     pass
     except yt_dlp.utils.DownloadCancelled:
+        _cleanup_incomplete_temp_mux_files(staging_dir)
         return {
             "canceled": True,
             "downloaded_bytes": state["last_downloaded"],
@@ -933,6 +1240,7 @@ def _run_download_once(
             "is_total_estimated": state["last_estimated"],
         }
     except Exception as exc:
+        _cleanup_incomplete_temp_mux_files(staging_dir)
         if _is_job_cancelled(job_id):
             return {
                 "canceled": True,
@@ -940,8 +1248,9 @@ def _run_download_once(
                 "total_bytes": state["last_total"],
                 "is_total_estimated": state["last_estimated"],
             }
+        err_text = "\n".join(job_logger.messages + [str(exc)]) if job_logger.messages else str(exc)
         return {
-            "error": str(exc),
+            "error": err_text,
             "downloaded_bytes": state["last_downloaded"],
             "total_bytes": state["last_total"],
             "is_total_estimated": state["last_estimated"],
@@ -952,6 +1261,7 @@ def _run_download_once(
             _ACTIVE_SUBPROCESSES.pop(job_id, None)
 
     if _is_job_cancelled(job_id):
+        _cleanup_incomplete_temp_mux_files(staging_dir)
         return {
             "canceled": True,
             "downloaded_bytes": state["last_downloaded"],
@@ -983,7 +1293,7 @@ def execute_single_download(
     cache_dir: str,
     progress_cb,
 ) -> str:
-    """Executes a single-video download + optional FFmpeg merge with transient 403 retry."""
+    """Executes a single-video download + optional FFmpeg merge with cached-info reuse and retries."""
     clear_job_cancelled(job_id)
     req = json.loads(request_json)
     url = str(req["url"])
@@ -992,10 +1302,18 @@ def execute_single_download(
         staging_dir, "%(title).100B [%(id)s] [%(format_id)s].%(ext)s"
     )
 
-    cached_raw = _raw_cache_get(url)
+    rust_lib = _load_rust_lib(native_lib_dir)
+    cls_res = _call_rust_str(rust_lib, rust_lib.hyperdl_classify_url_json, url)
+    if "error" in cls_res:
+        return json.dumps({"error": cls_res["error"]})
+
+    normalized_url = cls_res["ok"].get("normalized_url") or url.strip()
+    is_instagram = cls_res["ok"].get("platform") == "InstagramReel"
+
+    cached_raw = _raw_cache_get(normalized_url) or _raw_cache_get(url)
     res = _run_download_once(
         job_id,
-        url,
+        normalized_url,
         selection,
         staging_dir,
         outtmpl,
@@ -1004,28 +1322,33 @@ def execute_single_download(
         cache_dir,
         progress_cb,
         cached_info=cached_raw,
+        is_instagram=is_instagram,
     )
     if "error" in res and not _is_job_cancelled(job_id):
-        if cached_raw is not None:
-            _raw_cache_evict(url, cached_raw.get("id"))
-            res = _run_download_once(
-                job_id,
-                url,
-                selection,
-                staging_dir,
-                outtmpl,
-                native_lib_dir,
-                bin_dir,
-                cache_dir,
-                progress_cb,
-                cached_info=None,
-            )
-        if "error" in res and "HTTP Error 403" in res["error"] and not _is_job_cancelled(job_id):
-            time.sleep(1.5)
-            if not _is_job_cancelled(job_id):
+        if is_instagram:
+            if cached_raw is not None and int(res.get("downloaded_bytes") or 0) == 0:
+                _raw_cache_evict(normalized_url, cached_raw.get("id"))
+                _raw_cache_evict(url, cached_raw.get("id"))
+                if progress_cb is not None:
+                    _emit_cb(
+                        progress_cb,
+                        json.dumps(
+                            {
+                                "job_id": job_id,
+                                "phase": "Analyzing",
+                                "downloaded_bytes": 0,
+                                "total_bytes": None,
+                                "is_total_estimated": False,
+                                "speed_bytes_per_sec": None,
+                                "eta_seconds": None,
+                                "output_path": None,
+                                "message": "Connecting to Instagram...",
+                            }
+                        ),
+                    )
                 res = _run_download_once(
                     job_id,
-                    url,
+                    normalized_url,
                     selection,
                     staging_dir,
                     outtmpl,
@@ -1034,5 +1357,89 @@ def execute_single_download(
                     cache_dir,
                     progress_cb,
                     cached_info=None,
+                    is_instagram=True,
                 )
+            if (
+                "error" in res
+                and int(res.get("downloaded_bytes") or 0) == 0
+                and not _is_job_cancelled(job_id)
+            ):
+                classified_err = _classify_instagram_error(rust_lib, res["error"])
+                if classified_err.get("is_transient"):
+                    if progress_cb is not None:
+                        _emit_cb(
+                            progress_cb,
+                            json.dumps(
+                                {
+                                    "job_id": job_id,
+                                    "phase": "Analyzing",
+                                    "downloaded_bytes": 0,
+                                    "total_bytes": None,
+                                    "is_total_estimated": False,
+                                    "speed_bytes_per_sec": None,
+                                    "eta_seconds": None,
+                                    "output_path": None,
+                                    "message": "Retrying connection to Instagram...",
+                                }
+                            ),
+                        )
+                    _sleep_cancelable(job_id, 1.5)
+                    if not _is_job_cancelled(job_id):
+                        res = _run_download_once(
+                            job_id,
+                            normalized_url,
+                            selection,
+                            staging_dir,
+                            outtmpl,
+                            native_lib_dir,
+                            bin_dir,
+                            cache_dir,
+                            progress_cb,
+                            cached_info=None,
+                            is_instagram=True,
+                        )
+            if "error" in res and not _is_job_cancelled(job_id):
+                classified_err = _classify_instagram_error(rust_lib, res["error"])
+                sys.stderr.write(
+                    f"[hyperdl][diag] Android Instagram download failed: "
+                    f"{classified_err.get('redacted_diagnostic', '')}\n"
+                )
+                res["error"] = classified_err["user_message"]
+        else:
+            if cached_raw is not None:
+                _raw_cache_evict(normalized_url, cached_raw.get("id"))
+                _raw_cache_evict(url, cached_raw.get("id"))
+                res = _run_download_once(
+                    job_id,
+                    normalized_url,
+                    selection,
+                    staging_dir,
+                    outtmpl,
+                    native_lib_dir,
+                    bin_dir,
+                    cache_dir,
+                    progress_cb,
+                    cached_info=None,
+                    is_instagram=False,
+                )
+            if (
+                "error" in res
+                and "HTTP Error 403" in res["error"]
+                and not _is_job_cancelled(job_id)
+            ):
+                _sleep_cancelable(job_id, 1.5)
+                if not _is_job_cancelled(job_id):
+                    res = _run_download_once(
+                        job_id,
+                        normalized_url,
+                        selection,
+                        staging_dir,
+                        outtmpl,
+                        native_lib_dir,
+                        bin_dir,
+                        cache_dir,
+                        progress_cb,
+                        cached_info=None,
+                        is_instagram=False,
+                    )
     return json.dumps(res)

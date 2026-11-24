@@ -84,6 +84,8 @@ object AndroidDownloadEngine {
     private var boundForegroundService: HyperDownloadForegroundService? = null
 
     private var lastNotificationMs = 0L
+    private var lastSingleNotificationPhase: String? = null
+    private var lastSingleNotificationMessage: String? = null
     private var lastCheckpointMs = 0L
     private var lastPlaylistNotificationPhase: String? = null
     private var lastPlaylistNotificationTitle: String? = null
@@ -240,19 +242,23 @@ object AndroidDownloadEngine {
 
     fun startDownload(context: Context, requestJson: String): String {
         val appCtx = context.applicationContext
-        synchronized(stateLock) {
+        val prevStaleStaging = synchronized(stateLock) {
             if (activeSingleJob?.isRunning == true) {
                 throw IllegalStateException("Another download is already running.")
             }
             if (activePlaylistSession?.isRunning == true) {
                 throw IllegalStateException("A playlist download is already in progress.")
             }
+            activeSingleJob?.stagingDir
         }
 
         val reqObj = JSONObject(requestJson)
         val title = reqObj.optString("title").takeIf { it.isNotBlank() } ?: "Media Download"
         val jobId = UUID.randomUUID().toString()
         val stagingDir = File(stagingBaseDir(appCtx), "single_$jobId").apply { mkdirs() }
+        if (prevStaleStaging != null && prevStaleStaging != stagingDir.absolutePath) {
+            runCatching { File(prevStaleStaging).deleteRecursively() }
+        }
 
         val record = SingleJobRecord(
             jobId = jobId,
@@ -328,13 +334,14 @@ object AndroidDownloadEngine {
                     val down = obj.optLong("downloaded_bytes", 0L)
                     val total = if (obj.isNull("total_bytes")) null else obj.optLong("total_bytes")
                     val speed = if (obj.isNull("speed_bytes_per_sec")) null else obj.optDouble("speed_bytes_per_sec")
+                    val message = if (obj.isNull("message")) null else obj.optString("message").takeIf { it.isNotBlank() }
                     synchronized(stateLock) {
                         record.downloadedBytes = down
                         if (total != null) record.totalBytes = total
                         record.lastPhase = phase
                     }
                     maybeCheckpointSingle(appCtx, record, phase)
-                    maybeUpdateSingleNotification(appCtx, record.title, phase, down, total, speed)
+                    maybeUpdateSingleNotification(appCtx, record.title, phase, down, total, speed, message)
                 }
                 emitDownloadEvent(eventJson)
             }
@@ -1614,13 +1621,18 @@ object AndroidDownloadEngine {
         downloaded: Long,
         total: Long?,
         speedBps: Double?,
+        message: String? = null,
     ) {
         val now = System.currentTimeMillis()
-        if (phase == "Downloading" && now - lastNotificationMs < 500L) {
+        val stageChanged =
+            phase != lastSingleNotificationPhase || message != lastSingleNotificationMessage
+        if (phase == "Downloading" && downloaded > 0L && !stageChanged && now - lastNotificationMs < 500L) {
             return
         }
         lastNotificationMs = now
-        val percent = if (phase == "Merging") {
+        lastSingleNotificationPhase = phase
+        lastSingleNotificationMessage = message
+        val percent = if (phase == "Merging" || (phase == "Downloading" && downloaded <= 0L)) {
             null
         } else if (total != null && total > 0L) {
             ((downloaded.toDouble() / total.toDouble()) * 100.0).toInt().coerceIn(0, 100)
@@ -1628,8 +1640,20 @@ object AndroidDownloadEngine {
             null
         }
         val subtitle = when (phase) {
-            "Analyzing" -> "Analyzing streams..."
-            "Merging" -> "Merging video & audio with FFmpeg..."
+            "Analyzing" -> message ?: "Preparing download..."
+            "Merging" -> message ?: "Merging video & audio with FFmpeg..."
+            "Downloading" -> if (downloaded <= 0L) {
+                message ?: "Connecting..."
+            } else {
+                val pctStr = if (percent != null) "$percent% · " else ""
+                val speedStr = if (speedBps != null && speedBps > 0) {
+                    formatSpeedHuman(speedBps)
+                } else {
+                    formatBytesHuman(downloaded)
+                }
+                "$pctStr$speedStr"
+            }
+
             else -> {
                 val pctStr = if (percent != null) "$percent% · " else ""
                 val speedStr = if (speedBps != null && speedBps > 0) {

@@ -1425,6 +1425,14 @@ pub fn classify_instagram_error(stderr: &str) -> String {
             "curl: (7)",
             "curl: (28)",
             "transporterror",
+            "urlopen",
+            "gaierror",
+            "name or service not known",
+            "temporary failure in name resolution",
+            "nodename nor servname",
+            "remote end closed",
+            "incompleteread",
+            "eof occurred",
             "connection",
             "network",
             "ssl",
@@ -1453,6 +1461,14 @@ pub(crate) fn is_transient_instagram_transport_error(stderr: &str) -> bool {
             "curl: (7)",
             "curl: (28)",
             "transporterror",
+            "urlopen",
+            "gaierror",
+            "temporary failure in name resolution",
+            "connection reset",
+            "remote end closed",
+            "incompleteread",
+            "eof occurred",
+            "unexpected eof",
             "timed out",
             "could not resolve",
             "failed to connect",
@@ -2176,8 +2192,7 @@ impl DownloadManager {
         worker_start: std::time::Instant,
     ) -> Result<Option<DownloadAttemptOutcome>, std::io::Error> {
         if let Some(cached_raw) = get_cached_raw_inspection_json(&ctx.request.url) {
-            if let Ok(info_path) =
-                write_cached_info_json_temp_file(&ctx.job_id, &cached_raw).await
+            if let Ok(info_path) = write_cached_info_json_temp_file(&ctx.job_id, &cached_raw).await
             {
                 if let Ok(cached_args) = build_download_args_from_info_json(
                     &ctx.paths,
@@ -2199,7 +2214,8 @@ impl DownloadManager {
                     let _ = tokio::fs::remove_file(&info_path).await;
                     match cached_res {
                         Ok(attempt)
-                            if attempt.succeeded() || ctx.cancel_requested.load(Ordering::SeqCst) =>
+                            if attempt.succeeded()
+                                || ctx.cancel_requested.load(Ordering::SeqCst) =>
                         {
                             return Ok(Some(attempt));
                         }

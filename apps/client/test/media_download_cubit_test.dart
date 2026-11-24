@@ -1051,7 +1051,62 @@ void main() {
     );
 
     blocTest<MediaDownloadCubit, MediaDownloadState>(
-      'blocks Instagram Reel URLs when allowInstagramReels is false (Android guard)',
+      'allows Instagram Reel URLs by default across platforms',
+      build: () {
+        when(() => repo.inspectUrl(any())).thenAnswer(
+          (_) async => UrlInspectionResult(
+            kind: InspectionTargetKind.singleVideo,
+            video: _sampleInspection(),
+          ),
+        );
+        return MediaDownloadCubit(repository: repo);
+      },
+      act: (cubit) async {
+        cubit.initialize();
+        await cubit.analyzeUrl('https://www.instagram.com/reel/DTVTvUDj-b1/');
+      },
+      verify: (cubit) {
+        verify(
+          () => repo.inspectUrl('https://www.instagram.com/reel/DTVTvUDj-b1/'),
+        ).called(1);
+        expect(cubit.state.inspectionStatus, InspectionStatus.loaded);
+      },
+    );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'auto-inspects warm-start shared Instagram Reel URL replacing previous YouTube URL',
+      build: () {
+        when(() => repo.inspectUrl(any())).thenAnswer(
+          (_) async => UrlInspectionResult(
+            kind: InspectionTargetKind.singleVideo,
+            video: _sampleInspection(),
+          ),
+        );
+        return MediaDownloadCubit(
+          repository: repo,
+          sharedUrls: sharedUrlController.stream,
+        );
+      },
+      act: (cubit) async {
+        cubit.initialize();
+        cubit.updateUrl('https://www.youtube.com/watch?v=aqz-KE-bpKQ');
+        sharedUrlController.add('https://www.instagram.com/reel/DTVTvUDj-b1/');
+        await Future<void>.delayed(Duration.zero);
+      },
+      verify: (cubit) {
+        verify(
+          () => repo.inspectUrl('https://www.instagram.com/reel/DTVTvUDj-b1/'),
+        ).called(1);
+        expect(
+          cubit.state.urlInput,
+          'https://www.instagram.com/reel/DTVTvUDj-b1/',
+        );
+        expect(cubit.state.inspectionStatus, InspectionStatus.loaded);
+      },
+    );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'blocks Instagram Reel URLs when allowInstagramReels is explicitly false',
       build: () =>
           MediaDownloadCubit(repository: repo, allowInstagramReels: false),
       act: (cubit) async {

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:bloc/bloc.dart';
 import 'package:hyper_download_client/core/bridge/models.dart';
@@ -26,7 +25,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
     this.getInitialSharedUrl,
     this.sharedUrls,
     bool? allowInstagramReels,
-  }) : allowInstagramReels = allowInstagramReels ?? !Platform.isAndroid,
+  }) : allowInstagramReels = allowInstagramReels ?? true,
        super(const MediaDownloadState());
 
   /// Returns `true` when [rawUrl] points to an `instagram.com` host.

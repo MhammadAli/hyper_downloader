@@ -9,7 +9,10 @@ use crate::playlist::{
     parse_yt_dlp_playlist_json,
 };
 use crate::selection::select_playlist_item_option;
-use crate::yt_dlp::parse_yt_dlp_inspection_json;
+use crate::yt_dlp::{
+    classify_instagram_error, is_transient_instagram_transport_error, parse_yt_dlp_inspection_json,
+    redact_sensitive_diagnostics,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
@@ -29,6 +32,15 @@ struct ErrorEnvelope {
 struct UrlClassification {
     is_playlist: bool,
     normalized_url: String,
+    platform: String,
+    shortcode: Option<String>,
+}
+
+#[derive(Serialize)]
+struct InstagramErrorClassification {
+    user_message: String,
+    redacted_diagnostic: String,
+    is_transient: bool,
 }
 
 #[derive(Deserialize)]
@@ -211,9 +223,12 @@ pub unsafe extern "C" fn hyperdl_classify_url_json(raw_url: *const c_char) -> *m
     let result = (|| {
         let raw = cstr_to_str(raw_url, "raw_url")?;
         let classified = classify_and_normalize_url(raw).map_err(|e| e.to_string())?;
-        if classified.platform == MediaPlatform::InstagramReel {
-            return Err("Instagram Reels are currently supported on Windows only.".to_string());
+        let platform_name = match classified.platform {
+            MediaPlatform::YouTube => "YouTube",
+            MediaPlatform::InstagramReel => "InstagramReel",
+            MediaPlatform::Other => "Other",
         }
+        .to_string();
         let validated = classified.normalized_url;
         let playlist = is_playlist_url(&validated);
         let normalized_url = if playlist {
@@ -224,6 +239,30 @@ pub unsafe extern "C" fn hyperdl_classify_url_json(raw_url: *const c_char) -> *m
         Ok(UrlClassification {
             is_playlist: playlist,
             normalized_url,
+            platform: platform_name,
+            shortcode: classified.shortcode,
+        })
+    })();
+    serialize_result(result)
+}
+
+/// Classifies raw Instagram extractor/FFmpeg/transport error text into a safe
+/// user-facing message, redacted diagnostic string, and transient retry flag.
+///
+/// # Safety
+/// `raw_error` must be a valid NUL-terminated UTF-8 C string.
+/// Caller must free the returned pointer using [`hyperdl_free_string`].
+#[flutter_rust_bridge::frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn hyperdl_classify_instagram_error_json(
+    raw_error: *const c_char,
+) -> *mut c_char {
+    let result = (|| {
+        let raw = cstr_to_str(raw_error, "raw_error")?;
+        Ok(InstagramErrorClassification {
+            user_message: classify_instagram_error(raw),
+            redacted_diagnostic: redact_sensitive_diagnostics(raw),
+            is_transient: is_transient_instagram_transport_error(raw),
         })
     })();
     serialize_result(result)
@@ -458,13 +497,136 @@ mod tests {
     }
 
     #[test]
-    fn c_api_rejects_instagram_reel_for_android() {
-        let ig = CString::new("https://www.instagram.com/reel/DTVTvUDj-b1/").unwrap();
-        let out = unsafe { take_and_free(hyperdl_classify_url_json(ig.as_ptr())) };
-        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
-        let err = parsed["error"]
+    fn c_api_classifies_instagram_reel_urls_and_rejects_unsupported_routes() {
+        for (raw, expected_code) in [
+            ("https://www.instagram.com/reel/DTVTvUDj-b1/", "DTVTvUDj-b1"),
+            (
+                "https://m.instagram.com/reels/CDUMkliABpa?igsh=MzRlODBiNWFlZA==",
+                "CDUMkliABpa",
+            ),
+            (
+                "https://www.instagram.com/creator_name/reel/Cop84x6u7CP/?list=PL12345",
+                "Cop84x6u7CP",
+            ),
+        ] {
+            let ig = CString::new(raw).unwrap();
+            let out = unsafe { take_and_free(hyperdl_classify_url_json(ig.as_ptr())) };
+            let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert_eq!(parsed["ok"]["is_playlist"], false);
+            assert_eq!(parsed["ok"]["platform"], "InstagramReel");
+            assert_eq!(parsed["ok"]["shortcode"], expected_code);
+            assert_eq!(
+                parsed["ok"]["normalized_url"],
+                format!("https://www.instagram.com/reel/{expected_code}/")
+            );
+        }
+
+        for unsupported in [
+            "https://www.instagram.com/stories/nasa/12345/",
+            "https://www.instagram.com/p/C9abc123def/",
+            "https://www.instagram.com/tv/BkfuX9UB-eK/",
+            "https://www.instagram.com/nasa/",
+        ] {
+            let ig = CString::new(unsupported).unwrap();
+            let out = unsafe { take_and_free(hyperdl_classify_url_json(ig.as_ptr())) };
+            let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                parsed["error"].as_str().is_some(),
+                "expected rejection for {unsupported}, got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn c_api_classifies_instagram_errors_redacts_secrets_and_parses_reel_formats() {
+        let err_raw = CString::new(
+            "ERROR: <urlopen error [Errno -3] Temporary failure in name resolution>; Cookie: sessionid=secret123; https://cdn.example/v.mp4?oh=SECRET_OH",
+        )
+        .unwrap();
+        let err_out =
+            unsafe { take_and_free(hyperdl_classify_instagram_error_json(err_raw.as_ptr())) };
+        let err_json: serde_json::Value = serde_json::from_str(&err_out).unwrap();
+        assert_eq!(err_json["ok"]["is_transient"], true);
+        assert!(err_json["ok"]["user_message"]
             .as_str()
-            .expect("error field must be present");
-        assert!(err.contains("Windows only"));
+            .unwrap()
+            .contains("Network error"));
+        let diag = err_json["ok"]["redacted_diagnostic"].as_str().unwrap();
+        assert!(!diag.contains("secret123"));
+        assert!(!diag.contains("SECRET_OH"));
+        assert!(diag.contains("[REDACTED]"));
+
+        let dash_reel = CString::new(
+            r#"{
+            "id": "DTVTvUDj-b1",
+            "title": "Video by rahulmfg",
+            "uploader": "Rahul",
+            "webpage_url": "https://www.instagram.com/reel/DTVTvUDj-b1/",
+            "extractor_key": "Instagram",
+            "formats": [
+                {
+                    "format_id": "dash-a",
+                    "ext": "m4a",
+                    "vcodec": "none",
+                    "acodec": "mp4a.40.5",
+                    "abr": 68.0,
+                    "protocol": "https"
+                },
+                {
+                    "format_id": "dash-720v",
+                    "ext": "mp4",
+                    "vcodec": "vp09.00.31.08",
+                    "acodec": "none",
+                    "width": 720,
+                    "height": 1280,
+                    "protocol": "https"
+                },
+                {
+                    "format_id": "dash-1080v",
+                    "ext": "mp4",
+                    "vcodec": "vp09.00.40.08",
+                    "acodec": "none",
+                    "width": 1080,
+                    "height": 1920,
+                    "protocol": "https"
+                }
+            ]
+        }"#,
+        )
+        .unwrap();
+        let insp_out =
+            unsafe { take_and_free(hyperdl_parse_media_inspection_json(dash_reel.as_ptr())) };
+        let insp: TestOk<MediaInspection> = serde_json::from_str(&insp_out).unwrap();
+        assert_eq!(insp.ok.provider_name, "Instagram");
+        assert_eq!(
+            insp.ok
+                .original_audio
+                .as_ref()
+                .map(|a| a.status_note.as_str()),
+            Some("Audio included automatically")
+        );
+        assert_eq!(insp.ok.video_options.len(), 2);
+        assert_eq!(insp.ok.video_options[0].resolution, "1080p");
+        assert_eq!(insp.ok.video_options[1].resolution, "720p");
+        assert_eq!(
+            insp.ok.video_options[0].format_selection_strategy,
+            FormatSelectionStrategy::PairVideoAndAudioWithFfmpeg
+        );
+        assert_eq!(insp.ok.audio_options.len(), 1);
+        assert_eq!(insp.ok.audio_options[0].format_id, "dash-a");
+
+        let carousel = CString::new(
+            r#"{
+            "id": "CAR1",
+            "_type": "playlist",
+            "extractor_key": "Instagram",
+            "webpage_url": "https://www.instagram.com/reel/CAR1/"
+        }"#,
+        )
+        .unwrap();
+        let car_out =
+            unsafe { take_and_free(hyperdl_parse_media_inspection_json(carousel.as_ptr())) };
+        let car_json: serde_json::Value = serde_json::from_str(&car_out).unwrap();
+        assert!(car_json["error"].as_str().unwrap().contains("carousels"));
     }
 }
