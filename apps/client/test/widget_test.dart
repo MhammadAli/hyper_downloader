@@ -49,6 +49,7 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
   bool returnMissingAudio = false;
   bool returnProgressiveInstagramReel = false;
   Completer<UrlInspectionResult>? inspectCompleter;
+  PlaylistSizeEstimate? initialBestPlaylistSizeEstimate;
   String sampleTitle = 'Multi-Audio Test Presentation';
   String samplePlaylistTitle = 'Blender HQ Tutorials';
   String samplePlaylistFirstItemTitle = 'Episode One';
@@ -416,25 +417,26 @@ class FakeMediaDownloadRepository implements MediaDownloadRepository {
       );
     }
 
-    return PlaylistSizeEstimate(
-      estimationId: 'est-best',
-      playlistId: request.playlist.id,
-      mediaMode: request.mediaMode,
-      qualityCap: request.qualityCap,
-      status: PlaylistSizeStatus.calculating,
-      knownTotalBytes: BigInt.from(52428800),
-      totalEntriesCount: request.playlist.entries.length,
-      unavailableCount: 1,
-      eligibleCount: 2,
-      inspectedCount: 1,
-      exactCount: 0,
-      estimatedCount: 1,
-      unknownCount: 0,
-      failedCount: 0,
-      displaySummary: 'Calculating playlist size...',
-      statusMessage: 'Calculating sizes: 1 / 2 videos',
-      itemSizes: const [],
-    );
+    return initialBestPlaylistSizeEstimate ??
+        PlaylistSizeEstimate(
+          estimationId: 'est-best',
+          playlistId: request.playlist.id,
+          mediaMode: request.mediaMode,
+          qualityCap: request.qualityCap,
+          status: PlaylistSizeStatus.calculating,
+          knownTotalBytes: BigInt.from(52428800),
+          totalEntriesCount: request.playlist.entries.length,
+          unavailableCount: 1,
+          eligibleCount: 2,
+          inspectedCount: 1,
+          exactCount: 0,
+          estimatedCount: 1,
+          unknownCount: 0,
+          failedCount: 0,
+          displaySummary: 'Calculating playlist size...',
+          statusMessage: 'Calculating sizes: 1 / 2 videos',
+          itemSizes: const [],
+        );
   }
 
   @override
@@ -730,7 +732,8 @@ void main() {
           'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
         );
         await tester.tap(find.byKey(const Key('analyze_url_button')));
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
 
         expect(find.byKey(const Key('playlist_header_card')), findsOneWidget);
         expect(find.text('Blender HQ Tutorials'), findsOneWidget);
@@ -771,7 +774,8 @@ void main() {
 
         await tester.ensureVisible(find.text('Video with Sound'));
         await tester.tap(find.text('Video with Sound'));
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
         await tester.ensureVisible(find.text('Up to 720p'));
         await tester.tap(find.text('Up to 720p'));
         await tester.pumpAndSettle();
@@ -972,7 +976,8 @@ void main() {
           'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
         );
         await tester.tap(find.byKey(const Key('analyze_url_button')));
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
 
         expect(find.textContaining('قائمة تشغيل تعليمية'), findsOneWidget);
         expect(find.textContaining('الدرس الأول'), findsOneWidget);
@@ -1296,6 +1301,95 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text('Instagram'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'playlist size card shows animated spinner and indeterminate bar at 0 inspected, updates to determinate progress, and cancels immediately when starting download',
+      (WidgetTester tester) async {
+        fakeRepo.initialBestPlaylistSizeEstimate = PlaylistSizeEstimate(
+          estimationId: 'est-zero',
+          playlistId: 'PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+          mediaMode: PlaylistMediaMode.videoWithSound,
+          qualityCap: PlaylistQualityCap.bestAvailable,
+          status: PlaylistSizeStatus.calculating,
+          knownTotalBytes: BigInt.zero,
+          totalEntriesCount: 3,
+          unavailableCount: 1,
+          eligibleCount: 2,
+          inspectedCount: 0,
+          exactCount: 0,
+          estimatedCount: 0,
+          unknownCount: 0,
+          failedCount: 0,
+          displaySummary: 'Calculating playlist size...',
+          statusMessage: 'Calculating sizes: 0 / 2 videos',
+          itemSizes: const [],
+        );
+
+        await tester.pumpWidget(
+          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
+        );
+        await tester.pump();
+
+        await tester.enterText(
+          find.byKey(const Key('url_input_field')),
+          'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+        );
+        await tester.tap(find.byKey(const Key('analyze_url_button')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(find.byKey(const Key('playlist_size_spinner')), findsOneWidget);
+        final initialBar = tester.widget<LinearProgressIndicator>(
+          find.byKey(const Key('playlist_size_progress_bar')),
+        );
+        expect(initialBar.value, isNull);
+
+        fakeRepo.playlistSizeController.add(
+          PlaylistSizeEstimate(
+            estimationId: 'est-zero',
+            playlistId: 'PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+            mediaMode: PlaylistMediaMode.videoWithSound,
+            qualityCap: PlaylistQualityCap.bestAvailable,
+            status: PlaylistSizeStatus.calculating,
+            knownTotalBytes: BigInt.from(5242880),
+            totalEntriesCount: 3,
+            unavailableCount: 1,
+            eligibleCount: 2,
+            inspectedCount: 1,
+            exactCount: 1,
+            estimatedCount: 0,
+            unknownCount: 0,
+            failedCount: 0,
+            displaySummary: 'Calculating playlist size...',
+            statusMessage: 'Calculating sizes: 1 / 2 videos',
+            itemSizes: const [],
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(find.byKey(const Key('playlist_size_spinner')), findsOneWidget);
+        final progressBar = tester.widget<LinearProgressIndicator>(
+          find.byKey(const Key('playlist_size_progress_bar')),
+        );
+        expect(progressBar.value, closeTo(0.5, 0.001));
+
+        await tester.ensureVisible(
+          find.byKey(const Key('start_playlist_button')),
+        );
+        await tester.tap(find.byKey(const Key('start_playlist_button')));
+        await tester.pumpAndSettle();
+
+        expect(fakeRepo.lastCanceledSizeEstimationId, 'est-zero');
+        expect(find.byKey(const Key('playlist_size_spinner')), findsNothing);
+        expect(
+          find.byKey(const Key('playlist_size_progress_bar')),
+          findsNothing,
+        );
+        expect(find.text('At least 5.00 MB · canceled'), findsOneWidget);
+        expect(find.byKey(const Key('recalculate_size_button')), findsNothing);
       },
     );
   });

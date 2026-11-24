@@ -925,6 +925,219 @@ void main() {
     );
 
     blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'cancelPlaylistSizeEstimation updates status immediately and ignores late calculating updates',
+      build: () {
+        final playlist = _samplePlaylistInspection();
+        when(() => repo.inspectUrl(any())).thenAnswer(
+          (_) async => UrlInspectionResult(
+            kind: InspectionTargetKind.playlist,
+            playlist: playlist,
+          ),
+        );
+        when(() => repo.estimatePlaylistSize(any())).thenAnswer((
+          invocation,
+        ) async {
+          final req =
+              invocation.positionalArguments.first
+                  as EstimatePlaylistSizeRequest;
+          return PlaylistSizeEstimate(
+            estimationId: 'est-cancel-test',
+            playlistId: playlist.id,
+            mediaMode: req.mediaMode,
+            qualityCap: req.qualityCap,
+            status: PlaylistSizeStatus.calculating,
+            knownTotalBytes: BigInt.from(5242880),
+            totalEntriesCount: 3,
+            unavailableCount: 1,
+            eligibleCount: 2,
+            inspectedCount: 1,
+            exactCount: 1,
+            estimatedCount: 0,
+            unknownCount: 0,
+            failedCount: 0,
+            displaySummary: 'Calculating playlist size...',
+            statusMessage: 'Calculating sizes: 1 / 2 videos',
+            itemSizes: const [],
+          );
+        });
+        return MediaDownloadCubit(repository: repo)..initialize();
+      },
+      act: (cubit) async {
+        await cubit.analyzeUrl(
+          'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state.isCalculatingPlaylistSize, isTrue);
+
+        await cubit.cancelPlaylistSizeEstimation();
+        expect(cubit.state.isCalculatingPlaylistSize, isFalse);
+        expect(
+          cubit.state.playlistSizeEstimate?.status,
+          PlaylistSizeStatus.canceled,
+        );
+        expect(
+          cubit.state.playlistSizeEstimate?.displaySummary,
+          'At least 5.00 MB · canceled',
+        );
+        expect(
+          cubit.state.playlistSizeEstimate?.statusMessage,
+          'Canceled after inspecting 1 of 2 videos.',
+        );
+
+        sizeEstimateController.add(
+          PlaylistSizeEstimate(
+            estimationId: 'est-cancel-test',
+            playlistId: 'PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+            mediaMode: PlaylistMediaMode.videoWithSound,
+            qualityCap: PlaylistQualityCap.bestAvailable,
+            status: PlaylistSizeStatus.calculating,
+            knownTotalBytes: BigInt.from(10485760),
+            totalEntriesCount: 3,
+            unavailableCount: 1,
+            eligibleCount: 2,
+            inspectedCount: 2,
+            exactCount: 2,
+            estimatedCount: 0,
+            unknownCount: 0,
+            failedCount: 0,
+            displaySummary: 'Calculating playlist size...',
+            statusMessage: 'Calculating sizes: 2 / 2 videos',
+            itemSizes: const [],
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+      },
+      verify: (cubit) {
+        verify(
+          () => repo.cancelPlaylistSizeEstimation('est-cancel-test'),
+        ).called(1);
+        expect(
+          cubit.state.playlistSizeEstimate?.status,
+          PlaylistSizeStatus.canceled,
+        );
+        expect(cubit.state.isCalculatingPlaylistSize, isFalse);
+      },
+    );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
+      'startPlaylistDownload cancels calculating estimate immediately while preserving completed estimates',
+      build: () {
+        final playlist = _samplePlaylistInspection();
+        when(() => repo.inspectUrl(any())).thenAnswer(
+          (_) async => UrlInspectionResult(
+            kind: InspectionTargetKind.playlist,
+            playlist: playlist,
+          ),
+        );
+        when(() => repo.estimatePlaylistSize(any())).thenAnswer((
+          invocation,
+        ) async {
+          final req =
+              invocation.positionalArguments.first
+                  as EstimatePlaylistSizeRequest;
+          if (req.qualityCap == PlaylistQualityCap.upTo480P) {
+            return PlaylistSizeEstimate(
+              estimationId: 'est-completed-480',
+              playlistId: playlist.id,
+              mediaMode: req.mediaMode,
+              qualityCap: req.qualityCap,
+              status: PlaylistSizeStatus.exact,
+              knownTotalBytes: BigInt.from(12582912),
+              totalEntriesCount: 3,
+              unavailableCount: 1,
+              eligibleCount: 2,
+              inspectedCount: 2,
+              exactCount: 2,
+              estimatedCount: 0,
+              unknownCount: 0,
+              failedCount: 0,
+              displaySummary: '12.00 MB (Exact)',
+              itemSizes: const [],
+            );
+          }
+          return PlaylistSizeEstimate(
+            estimationId: 'est-running-best',
+            playlistId: playlist.id,
+            mediaMode: req.mediaMode,
+            qualityCap: req.qualityCap,
+            status: PlaylistSizeStatus.calculating,
+            knownTotalBytes: BigInt.zero,
+            totalEntriesCount: 3,
+            unavailableCount: 1,
+            eligibleCount: 2,
+            inspectedCount: 0,
+            exactCount: 0,
+            estimatedCount: 0,
+            unknownCount: 0,
+            failedCount: 0,
+            displaySummary: 'Calculating playlist size...',
+            statusMessage: 'Calculating sizes: 0 / 2 videos',
+            itemSizes: const [],
+          );
+        });
+        when(
+          () => repo.startPlaylistDownload(any()),
+        ).thenAnswer((_) async => _samplePlaylistSnapshot());
+        return MediaDownloadCubit(repository: repo)..initialize();
+      },
+      act: (cubit) async {
+        await cubit.analyzeUrl(
+          'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state.isCalculatingPlaylistSize, isTrue);
+
+        await cubit.startPlaylistDownload();
+        expect(cubit.state.isCalculatingPlaylistSize, isFalse);
+        expect(
+          cubit.state.playlistSizeEstimate?.status,
+          PlaylistSizeStatus.canceled,
+        );
+        expect(
+          cubit.state.playlistSizeEstimate?.displaySummary,
+          'Size calculation canceled',
+        );
+
+        await cubit.cancelPlaylistDownload();
+        playlistProgressController.add(
+          PlaylistProgressEvent(
+            sessionId: 'pl-session-1',
+            kind: PlaylistEventKind.playlistCanceled,
+            itemDownloadedBytes: BigInt.zero,
+            itemIsTotalEstimated: false,
+            completedCount: 0,
+            failedCount: 0,
+            skippedCount: 1,
+            totalCount: 3,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        cubit.setPlaylistQualityCap(PlaylistQualityCap.upTo480P);
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          cubit.state.playlistSizeEstimate?.status,
+          PlaylistSizeStatus.exact,
+        );
+
+        await cubit.startPlaylistDownload();
+      },
+      verify: (cubit) {
+        verify(
+          () => repo.cancelPlaylistSizeEstimation('est-running-best'),
+        ).called(1);
+        expect(
+          cubit.state.playlistSizeEstimate?.status,
+          PlaylistSizeStatus.exact,
+        );
+        expect(
+          cubit.state.playlistSizeEstimate?.displaySummary,
+          '12.00 MB (Exact)',
+        );
+      },
+    );
+
+    blocTest<MediaDownloadCubit, MediaDownloadState>(
       'auto-inspects initial cold-start shared URL when engine initializes',
       build: () {
         final video = _sampleInspection();

@@ -16,6 +16,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
   StreamSubscription<PlaylistSizeEstimate>? _sizeEstimateSubscription;
   StreamSubscription<String>? _sharedUrlSubscription;
   final List<PlaylistProgressEvent> _pendingPlaylistEvents = [];
+  final Set<String> _canceledSizeEstimationIds = {};
   int _sizeEstimateRequestSeq = 0;
   int _inspectionRequestSeq = 0;
   bool _pauseRequested = false;
@@ -183,7 +184,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
           return;
         }
         _pendingPlaylistEvents.clear();
-        await _cancelActiveSizeEstimation();
+        await _cancelActiveSizeEstimation(updateEstimateState: false);
         if (isClosed || seq != _inspectionRequestSeq) {
           return;
         }
@@ -233,7 +234,7 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
         return;
       }
 
-      await _cancelActiveSizeEstimation();
+      await _cancelActiveSizeEstimation(updateEstimateState: false);
       if (isClosed || seq != _inspectionRequestSeq) {
         return;
       }
@@ -466,7 +467,18 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
           qualityCap: cap,
         ),
       );
-      if (isClosed || seq != _sizeEstimateRequestSeq) return;
+      if (isClosed || seq != _sizeEstimateRequestSeq) {
+        if (result.status == PlaylistSizeStatus.calculating &&
+            result.estimationId.isNotEmpty) {
+          _canceledSizeEstimationIds.add(result.estimationId);
+          unawaited(
+            _repository
+                .cancelPlaylistSizeEstimation(result.estimationId)
+                .catchError((_) {}),
+          );
+        }
+        return;
+      }
       final existing = state.playlistSizeEstimate;
       if (existing != null &&
           existing.estimationId == result.estimationId &&
@@ -517,12 +529,29 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
     await _cancelActiveSizeEstimation();
   }
 
-  Future<void> _cancelActiveSizeEstimation() async {
+  Future<void> _cancelActiveSizeEstimation({
+    bool updateEstimateState = true,
+  }) async {
     _sizeEstimateRequestSeq++;
-    final activeId =
-        state.playlistSizeEstimate?.status == PlaylistSizeStatus.calculating
-        ? state.playlistSizeEstimate?.estimationId
+    final current = state.playlistSizeEstimate;
+    final activeId = current?.status == PlaylistSizeStatus.calculating
+        ? current?.estimationId
         : state.activeSizeEstimationId;
+    if (activeId != null && activeId.isNotEmpty) {
+      _canceledSizeEstimationIds.add(activeId);
+    }
+    if (updateEstimateState &&
+        current != null &&
+        current.status == PlaylistSizeStatus.calculating) {
+      emit(
+        state.copyWith(
+          activeSizeEstimationId: null,
+          playlistSizeEstimate: _canceledSizeEstimateFrom(current),
+        ),
+      );
+    } else if (state.activeSizeEstimationId != null) {
+      emit(state.copyWith(activeSizeEstimationId: null));
+    }
     if (activeId == null || activeId.isEmpty) return;
     try {
       await _repository.cancelPlaylistSizeEstimation(activeId);
@@ -532,6 +561,9 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
   }
 
   void _onPlaylistSizeEstimate(PlaylistSizeEstimate estimate) {
+    if (_canceledSizeEstimationIds.contains(estimate.estimationId)) {
+      return;
+    }
     if (!state.isPlaylistTarget ||
         state.playlistInspection?.id != estimate.playlistId ||
         estimate.mediaMode != state.playlistMediaMode ||
@@ -894,6 +926,42 @@ class MediaDownloadCubit extends Cubit<MediaDownloadState> {
             : null,
       ),
     );
+  }
+
+  PlaylistSizeEstimate _canceledSizeEstimateFrom(PlaylistSizeEstimate current) {
+    final summary = current.knownTotalBytes > BigInt.zero
+        ? 'At least ${_formatBytes(current.knownTotalBytes)} · canceled'
+        : 'Size calculation canceled';
+    return PlaylistSizeEstimate(
+      estimationId: current.estimationId,
+      playlistId: current.playlistId,
+      mediaMode: current.mediaMode,
+      qualityCap: current.qualityCap,
+      status: PlaylistSizeStatus.canceled,
+      knownTotalBytes: current.knownTotalBytes,
+      totalEntriesCount: current.totalEntriesCount,
+      unavailableCount: current.unavailableCount,
+      eligibleCount: current.eligibleCount,
+      inspectedCount: current.inspectedCount,
+      exactCount: current.exactCount,
+      estimatedCount: current.estimatedCount,
+      unknownCount: current.unknownCount,
+      failedCount: current.failedCount,
+      displaySummary: summary,
+      statusMessage:
+          'Canceled after inspecting ${current.inspectedCount} of ${current.eligibleCount} videos.',
+      itemSizes: current.itemSizes,
+    );
+  }
+
+  String _formatBytes(BigInt bytes) {
+    final value = bytes.toDouble();
+    if (value < 1024) return '${bytes.toInt()} B';
+    if (value < 1024 * 1024) return '${(value / 1024).toStringAsFixed(1)} KB';
+    if (value < 1024 * 1024 * 1024) {
+      return '${(value / (1024 * 1024)).toStringAsFixed(2)} MB';
+    }
+    return '${(value / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
   String _cleanErrorMessage(Object error) {

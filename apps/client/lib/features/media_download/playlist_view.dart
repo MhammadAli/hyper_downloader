@@ -351,7 +351,9 @@ class _PlaylistControlsCard extends StatelessWidget {
                 onCancel: state.canCancelPlaylistSize
                     ? cubit.cancelPlaylistSizeEstimation
                     : null,
-                onRecalculate: cubit.estimatePlaylistSize,
+                onRecalculate: controlsLocked
+                    ? null
+                    : cubit.estimatePlaylistSize,
               ),
             ],
             const SizedBox(height: 16),
@@ -702,7 +704,7 @@ class _ActivePlaylistItemPanel extends StatelessWidget {
 class _PlaylistSizeSummaryBox extends StatelessWidget {
   final PlaylistSizeEstimate estimate;
   final VoidCallback? onCancel;
-  final VoidCallback onRecalculate;
+  final VoidCallback? onRecalculate;
 
   const _PlaylistSizeSummaryBox({
     required this.estimate,
@@ -754,7 +756,10 @@ class _PlaylistSizeSummaryBox extends StatelessWidget {
       ),
     };
 
-    final double? fraction = isCalculating && estimate.eligibleCount > 0
+    final double? progressValue =
+        isCalculating &&
+            estimate.eligibleCount > 0 &&
+            estimate.inspectedCount > 0
         ? (estimate.inspectedCount / estimate.eligibleCount).clamp(0.0, 1.0)
         : null;
 
@@ -778,7 +783,18 @@ class _PlaylistSizeSummaryBox extends StatelessWidget {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(icon, size: 18, color: accent),
+                  if (isCalculating)
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        key: const Key('playlist_size_spinner'),
+                        strokeWidth: 2,
+                        color: accent,
+                      ),
+                    )
+                  else
+                    Icon(icon, size: 18, color: accent),
                   const SizedBox(width: 8),
                   Flexible(
                     child: Text(
@@ -803,7 +819,7 @@ class _PlaylistSizeSummaryBox extends StatelessWidget {
                   icon: const Icon(Icons.close_rounded, size: 16),
                   label: const Text('Cancel'),
                 )
-              else if (canRecalculate)
+              else if (canRecalculate && onRecalculate != null)
                 TextButton.icon(
                   key: const Key('recalculate_size_button'),
                   onPressed: onRecalculate,
@@ -816,18 +832,37 @@ class _PlaylistSizeSummaryBox extends StatelessWidget {
                 ),
             ],
           ),
-          if (isCalculating && fraction != null) ...[
+          if (isCalculating) ...[
             const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: LinearProgressIndicator(
-                key: const Key('playlist_size_progress_bar'),
-                minHeight: 6,
-                value: fraction,
-                backgroundColor: scheme.surfaceContainerHighest,
-                valueColor: AlwaysStoppedAnimation<Color>(accent),
+            if (progressValue == null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  key: const Key('playlist_size_progress_bar'),
+                  minHeight: 6,
+                  value: null,
+                  backgroundColor: scheme.surfaceContainerHighest,
+                  valueColor: AlwaysStoppedAnimation<Color>(accent),
+                ),
+              )
+            else
+              TweenAnimationBuilder<double>(
+                tween: Tween<double>(begin: 0.0, end: progressValue),
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                builder: (context, animatedValue, _) {
+                  return ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      key: const Key('playlist_size_progress_bar'),
+                      minHeight: 6,
+                      value: animatedValue,
+                      backgroundColor: scheme.surfaceContainerHighest,
+                      valueColor: AlwaysStoppedAnimation<Color>(accent),
+                    ),
+                  );
+                },
               ),
-            ),
           ],
           if (estimate.statusMessage != null &&
               estimate.statusMessage!.isNotEmpty) ...[
