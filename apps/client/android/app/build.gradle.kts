@@ -82,5 +82,3 @@ kotlin {
 flutter {
     source = "../.."
 }
-
-apply(from = "cargokit.gradle")

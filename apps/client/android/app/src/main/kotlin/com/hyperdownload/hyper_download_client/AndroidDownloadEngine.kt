@@ -63,9 +63,6 @@ object AndroidDownloadEngine {
     private var playlistEventEmitter: ((String) -> Unit)? = null
 
     @Volatile
-    private var sizeEstimateEventEmitter: ((String) -> Unit)? = null
-
-    @Volatile
     private var latestSingleEventJson: String? = null
 
     @Volatile
@@ -79,7 +76,6 @@ object AndroidDownloadEngine {
 
     private var activeSingleJob: SingleJobRecord? = null
     private var activePlaylistSession: PlaylistRuntimeRecord? = null
-    private var activeEstimationId: String? = null
 
     private var boundJobService: Pair<HyperDownloadJobService, JobParameters>? = null
     private var boundForegroundService: HyperDownloadForegroundService? = null
@@ -164,8 +160,25 @@ object AndroidDownloadEngine {
         }
     }
 
-    fun setSizeEstimateEventEmitter(emitter: ((String) -> Unit)?) {
-        sizeEstimateEventEmitter = emitter
+    fun extractRawInfo(
+        context: Context,
+        url: String,
+        isPlaylist: Boolean,
+        isInstagram: Boolean,
+    ): String {
+        val appCtx = context.applicationContext
+        return workerModule(appCtx)
+            .callAttr(
+                "extract_raw_info",
+                url,
+                nativeLibDir(appCtx),
+                binDir(appCtx),
+                cacheDir(appCtx),
+                isPlaylist,
+                isInstagram,
+                Build.VERSION.SDK_INT,
+            )
+            .toString()
     }
 
     private fun ensurePython(context: Context): Python {
@@ -211,47 +224,6 @@ object AndroidDownloadEngine {
         val appCtx = context.applicationContext
         return workerModule(appCtx)
             .callAttr("run_diagnostics", nativeLibDir(appCtx), binDir(appCtx))
-            .toString()
-    }
-
-    fun inspectUrl(context: Context, url: String): String {
-        val appCtx = context.applicationContext
-        return workerModule(appCtx)
-            .callAttr(
-                "inspect_url",
-                url,
-                nativeLibDir(appCtx),
-                binDir(appCtx),
-                cacheDir(appCtx),
-                Build.VERSION.SDK_INT,
-            )
-            .toString()
-    }
-
-    fun inspectMedia(context: Context, url: String): String {
-        val appCtx = context.applicationContext
-        return workerModule(appCtx)
-            .callAttr(
-                "inspect_media",
-                url,
-                nativeLibDir(appCtx),
-                binDir(appCtx),
-                cacheDir(appCtx),
-                Build.VERSION.SDK_INT,
-            )
-            .toString()
-    }
-
-    fun inspectPlaylist(context: Context, url: String): String {
-        val appCtx = context.applicationContext
-        return workerModule(appCtx)
-            .callAttr(
-                "inspect_playlist",
-                url,
-                nativeLibDir(appCtx),
-                binDir(appCtx),
-                cacheDir(appCtx),
-            )
             .toString()
     }
 
@@ -518,100 +490,6 @@ object AndroidDownloadEngine {
             }
             notifyIdleIfNoWork(appCtx)
         }
-    }
-
-    fun estimatePlaylistSize(context: Context, requestJson: String): String {
-        val appCtx = context.applicationContext
-        val previousId = synchronized(stateLock) {
-            val prev = activeEstimationId
-            val newId = UUID.randomUUID().toString()
-            activeEstimationId = newId
-            prev to newId
-        }
-        if (previousId.first != null) {
-            runCatching {
-                workerModule(appCtx).callAttr("cancel_size_estimation", previousId.first)
-            }
-        }
-        val estimationId = previousId.second
-        val reqObj = JSONObject(requestJson)
-        val playlist = reqObj.getJSONObject("playlist")
-        val mediaMode = reqObj.getString("media_mode")
-        val qualityCap = reqObj.getString("quality_cap")
-        val entries = playlist.optJSONArray("entries") ?: JSONArray()
-
-        // First build initial snapshot quickly by checking cached items or launching async worker.
-        val initialResultRef = AtomicReference<String?>(null)
-        val initialReady = java.util.concurrent.CountDownLatch(1)
-        val startedSync = AtomicBoolean(false)
-
-        val cb = pythonCallback { estJson ->
-            if (startedSync.compareAndSet(false, true)) {
-                initialResultRef.set(estJson)
-                initialReady.countDown()
-            }
-            emitSizeEstimateEvent(estJson)
-        }
-
-        workerExecutor.execute {
-            val resRaw = runCatching {
-                workerModule(appCtx).callAttr(
-                    "estimate_playlist_size",
-                    estimationId,
-                    requestJson,
-                    nativeLibDir(appCtx),
-                    binDir(appCtx),
-                    cacheDir(appCtx),
-                    cb,
-                ).toString()
-            }.getOrElse { err ->
-                JSONObject().put("error", err.message ?: err.toString()).toString()
-            }
-
-            if (startedSync.compareAndSet(false, true)) {
-                val parsed = runCatching { JSONObject(resRaw) }.getOrNull()
-                if (parsed != null && parsed.has("ok")) {
-                    initialResultRef.set(parsed.getJSONObject("ok").toString())
-                } else {
-                    val errMsg = parsed?.optString("error") ?: "Failed to calculate playlist size."
-                    val unavailable = (0 until entries.length()).count { idx ->
-                        entries.getJSONObject(idx).optString("availability") != "Available"
-                    }
-                    val eligible = entries.length() - unavailable
-                    val failSnap = JSONObject().apply {
-                        put("estimation_id", estimationId)
-                        put("playlist_id", playlist.optString("id"))
-                        put("media_mode", mediaMode)
-                        put("quality_cap", qualityCap)
-                        put("status", "Failed")
-                        put("known_total_bytes", 0)
-                        put("total_entries_count", entries.length())
-                        put("unavailable_count", unavailable)
-                        put("eligible_count", eligible)
-                        put("inspected_count", 0)
-                        put("exact_count", 0)
-                        put("estimated_count", 0)
-                        put("unknown_count", 0)
-                        put("failed_count", eligible)
-                        put("display_summary", "Some video sizes could not be determined")
-                        put("status_message", errMsg)
-                        put("item_sizes", JSONArray())
-                    }.toString()
-                    initialResultRef.set(failSnap)
-                    emitSizeEstimateEvent(failSnap)
-                }
-                initialReady.countDown()
-            }
-        }
-
-        initialReady.await()
-        return initialResultRef.get()
-            ?: throw IllegalStateException("Size estimation produced no initial snapshot.")
-    }
-
-    fun cancelPlaylistSizeEstimation(context: Context, estimationId: String) {
-        val appCtx = context.applicationContext
-        runCatching { workerModule(appCtx).callAttr("cancel_size_estimation", estimationId) }
     }
 
     fun loadSavedPlaylistSession(context: Context, playlistId: String): String? {
@@ -965,6 +843,7 @@ object AndroidDownloadEngine {
                         nativeLibDir(appCtx),
                         binDir(appCtx),
                         cacheDir(appCtx),
+                        Build.VERSION.SDK_INT,
                     ).toString()
                 }.getOrElse { err ->
                     JSONObject().put("error", err.message ?: err.toString()).toString()
@@ -991,7 +870,6 @@ object AndroidDownloadEngine {
                         mediaObj.toString(),
                         record.snapshot.getString("media_mode"),
                         record.snapshot.getString("quality_cap"),
-                        nativeLibDir(appCtx),
                     ).toString()
                 }.getOrElse { err ->
                     JSONObject().put("error", err.message ?: err.toString()).toString()
@@ -1843,11 +1721,6 @@ object AndroidDownloadEngine {
             return
         }
         latestPlaylistEventPendingDelivery = false
-        mainHandler.post { emitter(json) }
-    }
-
-    private fun emitSizeEstimateEvent(json: String) {
-        val emitter = sizeEstimateEventEmitter ?: return
         mainHandler.post { emitter(json) }
     }
 

@@ -1,17 +1,16 @@
 """Chaquopy Python 3.13 media runtime worker for HyperDownload on Android.
 
 Wraps `yt-dlp`, `yt-dlp-ejs`, `libqjs.so` (QuickJS-NG), `libffmpeg.so`,
-`libffprobe.so`, and the canonical Rust logic inside `libengine_ffi.so`.
+and `libffprobe.so` for raw media extraction and download execution.
 """
 
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import copy
-import ctypes
 import importlib.metadata
 import json
 import math
 import os
+import re
 import socket
 import ssl
 import struct
@@ -19,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 import certifi
@@ -26,8 +26,6 @@ import yt_dlp
 import yt_dlp_ejs
 
 _SYMLINK_LOCK = threading.Lock()
-_RUST_LIB_LOCK = threading.Lock()
-_RUST_LIB = None
 
 _CACHE_LOCK = threading.Lock()
 _INSPECTION_CACHE = {}
@@ -44,7 +42,6 @@ _TRACK_LOCK = threading.Lock()
 _CURRENT_JOB = threading.local()
 _ACTIVE_SUBPROCESSES = {}
 _CANCELLED_JOBS = set()
-_CANCELLED_ESTIMATIONS = set()
 _POPEN_PATCHED = False
 _ORIG_POPEN = subprocess.Popen
 
@@ -142,16 +139,6 @@ def cancel_job(job_id: str):
             pass
 
 
-def cancel_size_estimation(estimation_id: str):
-    with _TRACK_LOCK:
-        _CANCELLED_ESTIMATIONS.add(estimation_id)
-
-
-def _is_estimation_cancelled(estimation_id: str) -> bool:
-    with _TRACK_LOCK:
-        return estimation_id in _CANCELLED_ESTIMATIONS
-
-
 def _emit_cb(cb, payload_json: str):
     if cb is None:
         return
@@ -200,63 +187,12 @@ def ensure_bin_symlinks(native_lib_dir: str, bin_dir: str) -> dict:
         return resolved
 
 
-def _load_rust_lib(native_lib_dir: str):
-    global _RUST_LIB
-    with _RUST_LIB_LOCK:
-        if _RUST_LIB is not None:
-            return _RUST_LIB
-
-        lib_path = os.path.join(native_lib_dir, "libengine_ffi.so")
-        if not os.path.isfile(lib_path):
-            raise FileNotFoundError(f"Missing Rust engine library: {lib_path}")
-
-        lib = ctypes.CDLL(lib_path)
-
-        lib.hyperdl_parse_media_inspection_json.argtypes = [ctypes.c_char_p]
-        lib.hyperdl_parse_media_inspection_json.restype = ctypes.c_void_p
-
-        lib.hyperdl_parse_playlist_inspection_json.argtypes = [
-            ctypes.c_char_p,
-            ctypes.c_char_p,
-        ]
-        lib.hyperdl_parse_playlist_inspection_json.restype = ctypes.c_void_p
-
-        lib.hyperdl_select_playlist_item_option_json.argtypes = [
-            ctypes.c_char_p,
-            ctypes.c_char_p,
-            ctypes.c_char_p,
-        ]
-        lib.hyperdl_select_playlist_item_option_json.restype = ctypes.c_void_p
-
-        lib.hyperdl_build_playlist_size_estimate_json.argtypes = [ctypes.c_char_p]
-        lib.hyperdl_build_playlist_size_estimate_json.restype = ctypes.c_void_p
-
-        lib.hyperdl_classify_url_json.argtypes = [ctypes.c_char_p]
-        lib.hyperdl_classify_url_json.restype = ctypes.c_void_p
-
-        if hasattr(lib, "hyperdl_classify_instagram_error_json"):
-            lib.hyperdl_classify_instagram_error_json.argtypes = [ctypes.c_char_p]
-            lib.hyperdl_classify_instagram_error_json.restype = ctypes.c_void_p
-
-        lib.hyperdl_free_string.argtypes = [ctypes.c_void_p]
-        lib.hyperdl_free_string.restype = None
-
-        _RUST_LIB = lib
-        return _RUST_LIB
-
-
-def _call_rust_str(lib, fn, *str_args: str) -> dict:
-    encoded = [arg.encode("utf-8") for arg in str_args]
-    ptr = fn(*encoded)
-    if not ptr:
-        raise RuntimeError("Rust C-ABI call returned a null pointer.")
+def _is_instagram_url(url: str) -> bool:
     try:
-        raw_bytes = ctypes.cast(ptr, ctypes.c_char_p).value
-        if raw_bytes is None:
-            raise RuntimeError("Rust C-ABI call returned empty C string.")
-        return json.loads(raw_bytes.decode("utf-8"))
-    finally:
-        lib.hyperdl_free_string(ptr)
+        host = (urllib.parse.urlparse(url.strip()).hostname or "").lower().rstrip(".")
+        return host == "instagram.com" or host.endswith(".instagram.com")
+    except Exception:
+        return False
 
 
 def _base_ydl_opts(bins: dict, bin_dir: str, cache_dir: str) -> dict:
@@ -389,36 +325,152 @@ def _prepare_reusable_info(raw_info: dict) -> dict:
     return prepared
 
 
-def _classify_instagram_error(rust_lib, raw_error: str) -> dict:
+def _redact_sensitive_diagnostics(raw: str) -> str:
+    text = re.sub(
+        r"(?im)^(.*?\b(?:cookie|authorization):\s*)(.*)$",
+        r"\1[REDACTED]",
+        raw,
+    )
+    return re.sub(
+        r"(?i)((?:sessionid|csrftoken|ds_user_id|oh|_nc_ohc)=)[^&;\"')\s\]]+",
+        r"\1[REDACTED]",
+        text,
+    )
+
+
+def _classify_instagram_error(raw_error: str) -> dict:
     text = str(raw_error or "").strip()
-    if rust_lib is not None and hasattr(rust_lib, "hyperdl_classify_instagram_error_json"):
-        try:
-            res = _call_rust_str(
-                rust_lib, rust_lib.hyperdl_classify_instagram_error_json, text
-            )
-            if "ok" in res and isinstance(res["ok"], dict):
-                return res["ok"]
-        except Exception:
-            pass
     lower = text.lower()
-    if any(t in lower for t in ("429", "too many requests", "rate limit", "rate-limit")):
-        msg = "Instagram temporarily rate-limited requests. Please wait a few minutes and try again."
-    elif any(t in lower for t in ("404", "not found", "does not exist", "deleted", "removed")):
-        msg = "This Instagram Reel is unavailable or has been deleted."
-    elif any(t in lower for t in ("account is private", "private reel", "private video")):
-        msg = "This Instagram Reel is private or inaccessible."
-    elif any(t in lower for t in ("login required", "logged-in", "sign in", "cookies")):
-        msg = "Instagram requires login to view this Reel. Only public Reels are supported without login."
-    elif any(t in lower for t in ("ffmpeg", "ffprobe", "postprocessing", "muxing")):
+    if any(
+        t in lower
+        for t in (
+            "ffmpeg",
+            "ffprobe",
+            "postprocessing",
+            "error merging",
+            "[merger]",
+            "muxing",
+            "moov atom",
+        )
+    ):
         msg = "Failed to process video and audio streams with FFmpeg."
-    elif any(t in lower for t in ("timed out", "timeout", "urlopen", "gaierror", "ssl", "dns")):
+    elif any(
+        t in lower
+        for t in ("429", "too many requests", "rate limit", "rate-limit", "please wait a few minutes")
+    ):
+        msg = "Instagram temporarily rate-limited requests. Please wait a few minutes and try again."
+    elif any(
+        t in lower
+        for t in (
+            "http error 404",
+            "404: not found",
+            "not found",
+            "does not exist",
+            "has been deleted",
+            "been deleted",
+            "removed",
+            "broken",
+            "no longer available",
+        )
+    ):
+        msg = "This Instagram Reel is unavailable or has been deleted."
+    elif any(
+        t in lower
+        for t in (
+            "account is private",
+            "private reel",
+            "private video",
+            "this content is private",
+            "not available to you",
+        )
+    ):
+        msg = "This Instagram Reel is private or inaccessible."
+    elif any(
+        t in lower
+        for t in (
+            "login required",
+            "logged-in",
+            "locked behind the login page",
+            "need to log in",
+            "sign in",
+            "use --cookies",
+            "cookies are needed",
+            "cookies-from-browser",
+            "authentication",
+        )
+    ):
+        msg = "Instagram requires login to view this Reel. Only public Reels are supported without login."
+    elif any(
+        t in lower
+        for t in (
+            "empty media response",
+            "checkpoint",
+            "challenge_required",
+            "http error 403",
+            "403",
+            "csrf",
+            "unable to extract",
+            "blocked",
+            "automated",
+        )
+    ):
+        msg = "Instagram temporarily restricted this request. Please try again later."
+    elif "before media transfer started" in lower:
+        msg = "Timed out while connecting to Instagram. Check your internet connection and try again."
+    elif any(
+        t in lower
+        for t in (
+            "timed out",
+            "timeout",
+            "could not resolve",
+            "curl: (6)",
+            "curl: (7)",
+            "curl: (28)",
+            "transporterror",
+            "urlopen",
+            "gaierror",
+            "name or service not known",
+            "temporary failure in name resolution",
+            "nodename nor servname",
+            "remote end closed",
+            "incompleteread",
+            "eof occurred",
+            "connection",
+            "network",
+            "ssl",
+            "tls",
+            "dns",
+            "reset by peer",
+        )
+    ):
         msg = "Network error while contacting Instagram. Check your internet connection and try again."
     else:
         msg = "Instagram extraction failed. Please verify the Reel is public and try again."
+
+    is_transient = any(
+        t in lower
+        for t in (
+            "curl: (6)",
+            "curl: (7)",
+            "curl: (28)",
+            "transporterror",
+            "urlopen",
+            "gaierror",
+            "temporary failure in name resolution",
+            "connection reset",
+            "remote end closed",
+            "incompleteread",
+            "eof occurred",
+            "unexpected eof",
+            "timed out",
+            "could not resolve",
+            "failed to connect",
+        )
+    )
     return {
         "user_message": msg,
-        "redacted_diagnostic": text[:240],
-        "is_transient": any(t in lower for t in ("timed out", "timeout", "urlopen", "gaierror", "reset")),
+        "redacted_diagnostic": _redact_sensitive_diagnostics(text)[:400],
+        "is_transient": is_transient,
     }
 
 
@@ -496,7 +548,7 @@ def _sleep_cancelable(job_id: str, seconds: float):
 
 
 def run_diagnostics(native_lib_dir: str, bin_dir: str) -> str:
-    """Executes Phase A runtime verification across Python, yt-dlp, EJS, QuickJS, FFmpeg, FFprobe, and Rust."""
+    """Executes runtime verification across Python, yt-dlp, EJS, QuickJS, FFmpeg, and FFprobe."""
     report = {
         "ok": False,
         "python_version": sys.version,
@@ -510,8 +562,6 @@ def run_diagnostics(native_lib_dir: str, bin_dir: str) -> str:
         "ffmpeg_version": None,
         "ffprobe_ok": False,
         "ffprobe_version": None,
-        "rust_c_api_ok": False,
-        "rust_instagram_classify_ok": False,
         "curl_cffi_available": False,
         "curl_cffi_version": None,
         "request_handlers": [],
@@ -577,30 +627,6 @@ def run_diagnostics(native_lib_dir: str, bin_dir: str) -> str:
             raise RuntimeError(
                 f"FFprobe failed (rc={fp_proc.returncode}): {fp_proc.stderr.strip()}"
             )
-
-        rust_lib = _load_rust_lib(native_lib_dir)
-        cls_res = _call_rust_str(
-            rust_lib,
-            rust_lib.hyperdl_classify_url_json,
-            "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
-        )
-        report["rust_c_api_ok"] = (
-            "ok" in cls_res and cls_res["ok"].get("is_playlist") is False
-        )
-        if not report["rust_c_api_ok"]:
-            raise RuntimeError(f"Rust C-ABI check failed: {cls_res}")
-
-        ig_cls_res = _call_rust_str(
-            rust_lib,
-            rust_lib.hyperdl_classify_url_json,
-            "https://m.instagram.com/reels/DTVTvUDj-b1/?igsh=test",
-        )
-        report["rust_instagram_classify_ok"] = (
-            "ok" in ig_cls_res
-            and ig_cls_res["ok"].get("platform") == "InstagramReel"
-            and ig_cls_res["ok"].get("shortcode") == "DTVTvUDj-b1"
-            and ig_cls_res["ok"].get("is_playlist") is False
-        )
 
         try:
             import curl_cffi  # type: ignore
@@ -926,28 +952,35 @@ def _adapt_instagram_formats_for_android_sdk(
     return adapted
 
 
-def _inspect_media_dict(
+def _extract_raw_info_dict(
     url: str,
     native_lib_dir: str,
     bin_dir: str,
     cache_dir: str = "",
+    is_playlist: bool = False,
+    is_instagram: bool = False,
     android_sdk_int: int = 0,
 ) -> dict:
     _configure_tls_env()
     bins = ensure_bin_symlinks(native_lib_dir, bin_dir)
-    rust_lib = _load_rust_lib(native_lib_dir)
-
-    cls_res = _call_rust_str(rust_lib, rust_lib.hyperdl_classify_url_json, url)
-    if "error" in cls_res:
-        return {"error": cls_res["error"]}
-
-    normalized_url = cls_res["ok"].get("normalized_url") or url.strip()
-    is_instagram = cls_res["ok"].get("platform") == "InstagramReel"
+    target_url = url.strip()
+    ig_mode = bool(is_instagram or _is_instagram_url(target_url))
 
     ydl_opts = _base_ydl_opts(bins, bin_dir, cache_dir)
+    if is_playlist:
+        ydl_opts["noplaylist"] = False
+        ydl_opts["extract_flat"] = "in_playlist"
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(target_url, download=False)
+                sanitized = ydl.sanitize_info(info)
+            return {"ok": sanitized}
+        except Exception as exc:
+            return {"error": str(exc)}
+
     ydl_opts["noplaylist"] = True
     capture_logger = None
-    if is_instagram:
+    if ig_mode:
         ydl_opts["socket_timeout"] = _INSTAGRAM_SOCKET_TIMEOUT_SECS
         capture_logger = _QuietCaptureLogger()
         ydl_opts["logger"] = capture_logger
@@ -955,21 +988,21 @@ def _inspect_media_dict(
     t0 = time.monotonic()
     last_exc = None
     sanitized = None
-    max_attempts = 2 if is_instagram else 1
+    max_attempts = 2 if ig_mode else 1
     for attempt in range(1, max_attempts + 1):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(normalized_url, download=False)
+                info = ydl.extract_info(target_url, download=False)
                 sanitized = ydl.sanitize_info(info)
             last_exc = None
             break
         except Exception as exc:
             last_exc = exc
-            if is_instagram and attempt < max_attempts:
+            if ig_mode and attempt < max_attempts:
                 combined_err = "\n".join(
                     (capture_logger.messages if capture_logger else []) + [str(exc)]
                 )
-                classified_err = _classify_instagram_error(rust_lib, combined_err)
+                classified_err = _classify_instagram_error(combined_err)
                 if classified_err.get("is_transient"):
                     if capture_logger:
                         capture_logger.messages.clear()
@@ -978,11 +1011,11 @@ def _inspect_media_dict(
             break
 
     if last_exc is not None:
-        if is_instagram:
+        if ig_mode:
             combined_err = "\n".join(
                 (capture_logger.messages if capture_logger else []) + [str(last_exc)]
             )
-            classified_err = _classify_instagram_error(rust_lib, combined_err)
+            classified_err = _classify_instagram_error(combined_err)
             sys.stderr.write(
                 f"[hyperdl][diag] Android Instagram inspection failed ({time.monotonic() - t0:.2f}s): "
                 f"{classified_err.get('redacted_diagnostic', '')}\n"
@@ -990,292 +1023,251 @@ def _inspect_media_dict(
             return {"error": classified_err["user_message"]}
         return {"error": str(last_exc)}
 
-    try:
-        sanitized_for_parse = (
-            _adapt_instagram_formats_for_android_sdk(sanitized, android_sdk_int)
-            if is_instagram
-            else sanitized
-        )
-        raw_json = json.dumps(sanitized_for_parse)
-        parsed = _call_rust_str(
-            rust_lib, rust_lib.hyperdl_parse_media_inspection_json, raw_json
-        )
-        if "ok" in parsed:
-            _cache_put(parsed["ok"], normalized_url)
-            if normalized_url != url.strip():
-                _cache_put(parsed["ok"], url)
-            ttl = (
-                _INSTAGRAM_RAW_INFO_CACHE_TTL_SECS
-                if is_instagram
-                else _RAW_INFO_CACHE_TTL_SECS
-            )
-            _raw_cache_put(
-                sanitized,
-                normalized_url,
-                extra_urls=[url] if normalized_url != url.strip() else None,
-                ttl_secs=ttl,
-            )
-            if is_instagram:
-                insp = parsed["ok"]
-                sys.stderr.write(
-                    f"[hyperdl][timing] android instagram inspect complete: total={time.monotonic() - t0:.2f}s "
-                    f"video_options={len(insp.get('video_options') or [])} "
-                    f"audio_options={len(insp.get('audio_options') or [])}\n"
-                )
-        elif is_instagram and "error" in parsed:
-            err_msg = str(parsed["error"])
-            if not any(
-                k in err_msg.lower()
-                for k in ("carousel", "unsupported", "not supported", "private")
-            ):
-                classified_err = _classify_instagram_error(rust_lib, err_msg)
-                sys.stderr.write(
-                    f"[hyperdl][diag] Android Instagram metadata parse failed: "
-                    f"{classified_err.get('redacted_diagnostic', '')}\n"
-                )
-                return {
-                    "error": "Instagram returned an unsupported media format or incomplete response."
-                }
-        return parsed
-    except Exception as exc:
-        if is_instagram:
-            classified_err = _classify_instagram_error(rust_lib, str(exc))
-            sys.stderr.write(
-                f"[hyperdl][diag] Android Instagram inspection error: "
-                f"{classified_err.get('redacted_diagnostic', '')}\n"
-            )
-            return {"error": classified_err["user_message"]}
-        return {"error": str(exc)}
+    sanitized_for_parse = (
+        _adapt_instagram_formats_for_android_sdk(sanitized, android_sdk_int)
+        if ig_mode
+        else sanitized
+    )
+    ttl = (
+        _INSTAGRAM_RAW_INFO_CACHE_TTL_SECS
+        if ig_mode
+        else _RAW_INFO_CACHE_TTL_SECS
+    )
+    _raw_cache_put(sanitized, target_url, ttl_secs=ttl)
+    _cache_put(sanitized_for_parse, target_url)
+    return {"ok": sanitized_for_parse}
 
 
-def inspect_media(
+def extract_raw_info(
+    url: str,
+    native_lib_dir: str,
+    bin_dir: str,
+    cache_dir: str = "",
+    is_playlist: bool = False,
+    is_instagram: bool = False,
+    android_sdk_int: int = 0,
+) -> str:
+    """Extracts raw sanitized yt-dlp info JSON for Dart parsing & format synthesis."""
+    res = _extract_raw_info_dict(
+        url=url,
+        native_lib_dir=native_lib_dir,
+        bin_dir=bin_dir,
+        cache_dir=cache_dir,
+        is_playlist=bool(is_playlist),
+        is_instagram=bool(is_instagram),
+        android_sdk_int=int(android_sdk_int or 0),
+    )
+    if "error" in res:
+        return json.dumps({"error": res["error"]})
+    return json.dumps({"ok": json.dumps(res["ok"])})
+
+
+def inspect_media_cached(
+    video_id: str,
     url: str,
     native_lib_dir: str,
     bin_dir: str,
     cache_dir: str = "",
     android_sdk_int: int = 0,
 ) -> str:
-    """Inspects a single video URL via yt-dlp + QuickJS and parses via canonical Rust rules."""
-    return json.dumps(
-        _inspect_media_dict(
-            url,
-            native_lib_dir,
-            bin_dir,
-            cache_dir,
-            android_sdk_int=android_sdk_int,
-        )
-    )
-
-
-def _inspect_playlist_dict(
-    url: str, native_lib_dir: str, bin_dir: str, cache_dir: str = ""
-) -> dict:
-    _configure_tls_env()
-    bins = ensure_bin_symlinks(native_lib_dir, bin_dir)
-    rust_lib = _load_rust_lib(native_lib_dir)
-
-    cls_res = _call_rust_str(rust_lib, rust_lib.hyperdl_classify_url_json, url)
-    if "error" in cls_res:
-        return {"error": cls_res["error"]}
-    target_url = cls_res["ok"].get("normalized_url") or url.strip()
-
-    ydl_opts = _base_ydl_opts(bins, bin_dir, cache_dir)
-    ydl_opts["noplaylist"] = False
-    ydl_opts["extract_flat"] = "in_playlist"
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(target_url, download=False)
-            sanitized = ydl.sanitize_info(info)
-        raw_json = json.dumps(sanitized)
-        return _call_rust_str(
-            rust_lib,
-            rust_lib.hyperdl_parse_playlist_inspection_json,
-            raw_json,
-            target_url,
-        )
-    except Exception as exc:
-        return {"error": str(exc)}
-
-
-def inspect_playlist(
-    url: str, native_lib_dir: str, bin_dir: str, cache_dir: str = ""
-) -> str:
-    """Enumerates all accessible entries in a playlist via canonical Rust rules."""
-    return json.dumps(_inspect_playlist_dict(url, native_lib_dir, bin_dir, cache_dir))
-
-
-def inspect_url(
-    url: str,
-    native_lib_dir: str,
-    bin_dir: str,
-    cache_dir: str = "",
-    android_sdk_int: int = 0,
-) -> str:
-    """Classifies URL as SingleVideo or Playlist and runs the matching inspection."""
-    _configure_tls_env()
-    rust_lib = _load_rust_lib(native_lib_dir)
-    cls_res = _call_rust_str(rust_lib, rust_lib.hyperdl_classify_url_json, url)
-    if "error" in cls_res:
-        return json.dumps({"error": cls_res["error"]})
-
-    is_playlist = bool(cls_res["ok"].get("is_playlist"))
-    normalized = cls_res["ok"].get("normalized_url") or url.strip()
-    if is_playlist:
-        pl_res = _inspect_playlist_dict(normalized, native_lib_dir, bin_dir, cache_dir)
-        if "error" in pl_res:
-            return json.dumps({"error": pl_res["error"]})
-        return json.dumps(
-            {
-                "ok": {
-                    "kind": "Playlist",
-                    "video": None,
-                    "playlist": pl_res["ok"],
-                }
-            }
-        )
-
-    vid_res = _inspect_media_dict(
-        normalized,
-        native_lib_dir,
-        bin_dir,
-        cache_dir,
-        android_sdk_int=android_sdk_int,
-    )
-    if "error" in vid_res:
-        return json.dumps({"error": vid_res["error"]})
-    return json.dumps(
-        {
-            "ok": {
-                "kind": "SingleVideo",
-                "video": vid_res["ok"],
-                "playlist": None,
-            }
-        }
-    )
-
-
-def select_playlist_item_option(
-    inspection_json: str, media_mode: str, quality_cap: str, native_lib_dir: str
-) -> str:
-    """Resolves the exact format selection for a playlist item via Rust `selection.rs`."""
-    rust_lib = _load_rust_lib(native_lib_dir)
-    res = _call_rust_str(
-        rust_lib,
-        rust_lib.hyperdl_select_playlist_item_option_json,
-        inspection_json,
-        media_mode,
-        quality_cap,
+    """Returns raw sanitized info dict for background playlist item resolution."""
+    cached = _cache_get(video_id, url)
+    if cached is not None:
+        return json.dumps({"ok": cached})
+    res = _extract_raw_info_dict(
+        url=url,
+        native_lib_dir=native_lib_dir,
+        bin_dir=bin_dir,
+        cache_dir=cache_dir,
+        is_playlist=False,
+        is_instagram=_is_instagram_url(url),
+        android_sdk_int=int(android_sdk_int or 0),
     )
     return json.dumps(res)
 
 
-def inspect_media_cached(
-    video_id: str, url: str, native_lib_dir: str, bin_dir: str, cache_dir: str = ""
+def _extract_xtags_acont_py(raw_url: str) -> str:
+    url = (raw_url or "").strip()
+    if not url:
+        return ""
+    decoded = (
+        url.replace("%3D", "=")
+        .replace("%3d", "=")
+        .replace("%3A", ":")
+        .replace("%3a", ":")
+        .replace("%3B", ";")
+        .replace("%3b", ";")
+        .lower()
+    )
+    for marker in ("acont=", "acont:"):
+        idx = decoded.find(marker)
+        if idx != -1:
+            after = decoded[idx + len(marker) :]
+            val = re.split(r"[:&; ]", after, maxsplit=1)[0].strip()
+            if val:
+                return val
+    return ""
+
+
+def _is_dub_format_py(fmt: dict) -> bool:
+    acont = _extract_xtags_acont_py(str(fmt.get("url") or ""))
+    if acont in ("dubbed", "dubbed-auto"):
+        return True
+    note = str(fmt.get("format_note") or "").lower()
+    if "dubbed-auto" in note or "auto-dub" in note:
+        return True
+    return "dubbed" in re.split(r"[^a-z0-9]+", note)
+
+
+def _is_orig_format_py(fmt: dict) -> bool:
+    acont = _extract_xtags_acont_py(str(fmt.get("url") or ""))
+    if acont == "original":
+        return True
+    note = str(fmt.get("format_note") or "").lower()
+    return "original" in re.split(r"[^a-z0-9]+", note)
+
+
+def _audio_rank_key(fmt: dict, video_lang: str, prefer_m4a: bool):
+    is_dub = _is_dub_format_py(fmt)
+    is_orig = _is_orig_format_py(fmt)
+    lang_pref = int(fmt.get("language_preference") or 0)
+    fmt_lang = str(fmt.get("language") or "").strip().lower()
+    vid_lang = (video_lang or "").strip().lower()
+    lang_match = bool(vid_lang and fmt_lang and fmt_lang.split("-")[0] == vid_lang.split("-")[0])
+    tier = 0 if is_dub else (4 if is_orig else (3 if lang_pref > 0 else (2 if lang_match else 1)))
+    is_direct = "m3u8" not in str(fmt.get("protocol") or "").lower()
+    fid = str(fmt.get("format_id") or "")
+    is_non_drc = not fid.endswith("-drc") and "drc" not in str(fmt.get("format_note") or "").lower()
+    ext = str(fmt.get("ext") or "").lower()
+    acodec = str(fmt.get("acodec") or "").lower()
+    is_m4a = ext == "m4a" or acodec.startswith("mp4a")
+    container_score = 2 if (is_m4a == prefer_m4a) else 1
+    abr = float(fmt.get("abr") or fmt.get("tbr") or 0.0)
+    return (tier, is_direct, is_non_drc, container_score, abr)
+
+
+def select_playlist_item_option(
+    raw_info_json: str, media_mode: str, quality_cap: str
 ) -> str:
-    """Returns a cached `MediaInspection` if present or runs `inspect_media`."""
-    cached = _cache_get(video_id, url)
-    if cached is not None:
-        return json.dumps({"ok": cached})
-    return json.dumps(_inspect_media_dict(url, native_lib_dir, bin_dir, cache_dir))
+    """Pure-Python playlist item format resolver for Android background execution."""
+    try:
+        info = json.loads(raw_info_json)
+        formats = [
+            f
+            for f in (info.get("formats") or [])
+            if isinstance(f, dict)
+            and not f.get("has_drm")
+            and str(f.get("ext") or "").lower() != "mhtml"
+            and "storyboard" not in str(f.get("format_note") or "").lower()
+        ]
+        video_lang = str(info.get("language") or "")
 
-
-def estimate_playlist_size(
-    estimation_id: str,
-    request_json: str,
-    native_lib_dir: str,
-    bin_dir: str,
-    cache_dir: str,
-    estimate_cb,
-) -> str:
-    """Computes progressive playlist total size reusing cached per-item inspections."""
-    _configure_tls_env()
-    rust_lib = _load_rust_lib(native_lib_dir)
-    req = json.loads(request_json)
-    playlist = req["playlist"]
-    media_mode = req["media_mode"]
-    quality_cap = req["quality_cap"]
-    entries = playlist.get("entries", [])
-
-    item_results = {}
-    uncached = []
-    for entry in entries:
-        if entry.get("availability") != "Available":
-            continue
-        order_idx = int(entry["order_index"])
-        vid = str(entry.get("video_id") or "")
-        entry_url = str(entry.get("url") or "")
-        hit = _cache_get(vid, entry_url)
-        if hit is not None:
-            item_results[order_idx] = {"order_index": order_idx, "inspection": hit}
+        audios = [f for f in formats if _is_audio_only_format(f)]
+        has_non_dub = any(not _is_dub_format_py(a) for a in audios)
+        if has_non_dub:
+            audios_clean = [a for a in audios if not _is_dub_format_py(a)]
         else:
-            uncached.append(entry)
+            audios_clean = audios
 
-    def _build_snapshot(is_calc: bool, was_canceled: bool) -> dict:
-        payload = {
-            "estimation_id": estimation_id,
-            "playlist": playlist,
-            "media_mode": media_mode,
-            "quality_cap": quality_cap,
-            "item_results": list(item_results.values()),
-            "is_calculating": is_calc,
-            "was_canceled": was_canceled,
+        if media_mode == "AudioOnly":
+            if not audios_clean:
+                return json.dumps({"error": "No downloadable Audio Only stream discovered for this item."})
+            direct_audios = [a for a in audios_clean if "m3u8" not in str(a.get("protocol") or "").lower()]
+            pool = direct_audios or audios_clean
+            best_a = max(pool, key=lambda f: _audio_rank_key(f, video_lang, True))
+            ext = str(best_a.get("ext") or "m4a").lower()
+            br = best_a.get("abr") or best_a.get("tbr")
+            q_label = f"{ext.upper()} · {round(float(br))} kbps" if br else ext.upper()
+            return json.dumps({
+                "ok": {
+                    "selection": {"kind": "Single", "format_id": str(best_a["format_id"])},
+                    "quality_label": q_label,
+                    "container": ext,
+                    "audio_language": None,
+                }
+            })
+
+        cap_map = {
+            "BestAvailable": 100000,
+            "UpTo1080p": 1080,
+            "UpTo720p": 720,
+            "UpTo480p": 480,
         }
-        res = _call_rust_str(
-            rust_lib,
-            rust_lib.hyperdl_build_playlist_size_estimate_json,
-            json.dumps(payload),
-        )
-        if "error" in res:
-            raise RuntimeError(res["error"])
-        return res["ok"]
+        max_h = cap_map.get(quality_cap, 100000)
 
-    if not uncached:
-        final_snap = _build_snapshot(False, False)
-        final_json = json.dumps(final_snap)
-        _emit_cb(estimate_cb, final_json)
-        return json.dumps({"ok": final_snap})
-
-    initial_snap = _build_snapshot(True, False)
-    _emit_cb(estimate_cb, json.dumps(initial_snap))
-
-    lock = threading.Lock()
-
-    def _inspect_entry(entry: dict):
-        if _is_estimation_cancelled(estimation_id):
-            return None
-        order_idx = int(entry["order_index"])
-        entry_url = str(entry.get("url") or "")
-        res = _inspect_media_dict(entry_url, native_lib_dir, bin_dir, cache_dir)
-        if _is_estimation_cancelled(estimation_id):
-            return None
-        with lock:
-            if "ok" in res:
-                item_results[order_idx] = {
-                    "order_index": order_idx,
-                    "inspection": res["ok"],
-                }
+        muxed = []
+        video_only = []
+        for f in formats:
+            if _is_audio_only_format(f):
+                continue
+            vc = str(f.get("vcodec") or "").lower()
+            ac = str(f.get("acodec") or "").lower()
+            if vc == "none":
+                continue
+            w = int(f.get("width") or 0)
+            h = int(f.get("height") or 0)
+            eff_h = min(w, h) if (w > 0 and h > 0) else (h if h > 0 else 0)
+            if eff_h <= 0:
+                continue
+            if ac != "none" and (ac != "" or str(f.get("video_ext") or "")):
+                muxed.append((eff_h, f))
             else:
-                item_results[order_idx] = {
-                    "order_index": order_idx,
-                    "error": res.get("error", "Inspection failed"),
-                }
-            if not _is_estimation_cancelled(estimation_id) and estimate_cb is not None:
-                snap = _build_snapshot(True, False)
-                _emit_cb(estimate_cb, json.dumps(snap))
-        return order_idx
+                video_only.append((eff_h, f))
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = [pool.submit(_inspect_entry, e) for e in uncached]
-        for fut in as_completed(futures):
-            try:
-                fut.result()
-            except Exception:
-                pass
+        candidates = []
+        all_heights = sorted({h for h, _ in muxed} | {h for h, _ in video_only}, reverse=True)
+        for h in all_heights:
+            v_list = [f for fh, f in video_only if fh == h]
+            m_list = [f for fh, f in muxed if fh == h and (not has_non_dub or not _is_dub_format_py(f))]
+            if v_list and audios_clean:
+                best_v = max(v_list, key=lambda f: (
+                    "m3u8" not in str(f.get("protocol") or "").lower(),
+                    round(float(f.get("fps") or 0)),
+                    1 if str(f.get("ext") or "").lower() == "mp4" else 0,
+                    float(f.get("tbr") or 0),
+                ))
+                prefer_m4a = str(best_v.get("ext") or "").lower() == "mp4"
+                best_a = max(audios_clean, key=lambda f: _audio_rank_key(f, video_lang, prefer_m4a))
+                container = "mp4" if (prefer_m4a or str(best_a.get("ext") or "").lower() == "m4a") else "webm"
+                candidates.append((h, best_v, best_a, container, False))
+            elif m_list:
+                best_m = max(m_list, key=lambda f: (
+                    "m3u8" not in str(f.get("protocol") or "").lower(),
+                    round(float(f.get("fps") or 0)),
+                    float(f.get("tbr") or 0),
+                ))
+                container = str(best_m.get("ext") or "mp4").lower()
+                candidates.append((h, best_m, None, container, True))
 
-    was_canceled = _is_estimation_cancelled(estimation_id)
-    final_snap = _build_snapshot(False, was_canceled)
-    _emit_cb(estimate_cb, json.dumps(final_snap))
-    return json.dumps({"ok": final_snap})
+        if not candidates:
+            return json.dumps({"error": "No playable Video with Sound formats available for this item."})
+
+        chosen = next((c for c in candidates if c[0] <= max_h), candidates[-1])
+        h, v_fmt, a_fmt, container, is_muxed = chosen
+        fps = v_fmt.get("fps")
+        fps_part = f" {round(float(fps))}fps" if fps and float(fps) >= 45.0 else ""
+        res_label = "4K (2160p)" if h == 2160 else f"{h}p"
+        quality_label = f"{res_label}{fps_part} {container.upper()}"
+
+        if is_muxed or a_fmt is None:
+            selection = {"kind": "Single", "format_id": str(v_fmt["format_id"])}
+        else:
+            selection = {
+                "kind": "VideoAndAudio",
+                "video_format_id": str(v_fmt["format_id"]),
+                "audio_format_id": str(a_fmt["format_id"]),
+                "merge_container": container,
+            }
+        return json.dumps({
+            "ok": {
+                "selection": selection,
+                "quality_label": quality_label,
+                "container": container,
+                "audio_language": None,
+            }
+        })
+    except Exception as exc:
+        return json.dumps({"error": str(exc)})
 
 
 def _cleanup_incomplete_temp_mux_files(staging_dir: str):
@@ -1612,13 +1604,8 @@ def execute_single_download(
         staging_dir, "%(title).100B [%(id)s] [%(format_id)s].%(ext)s"
     )
 
-    rust_lib = _load_rust_lib(native_lib_dir)
-    cls_res = _call_rust_str(rust_lib, rust_lib.hyperdl_classify_url_json, url)
-    if "error" in cls_res:
-        return json.dumps({"error": cls_res["error"]})
-
-    normalized_url = cls_res["ok"].get("normalized_url") or url.strip()
-    is_instagram = cls_res["ok"].get("platform") == "InstagramReel"
+    normalized_url = url.strip()
+    is_instagram = _is_instagram_url(normalized_url)
 
     cached_raw = _raw_cache_get(normalized_url) or _raw_cache_get(url)
     res = _run_download_once(
@@ -1674,7 +1661,7 @@ def execute_single_download(
                 and int(res.get("downloaded_bytes") or 0) == 0
                 and not _is_job_cancelled(job_id)
             ):
-                classified_err = _classify_instagram_error(rust_lib, res["error"])
+                classified_err = _classify_instagram_error(res["error"])
                 if classified_err.get("is_transient"):
                     if progress_cb is not None:
                         _emit_cb(
@@ -1709,7 +1696,7 @@ def execute_single_download(
                             is_instagram=True,
                         )
             if "error" in res and not _is_job_cancelled(job_id):
-                classified_err = _classify_instagram_error(rust_lib, res["error"])
+                classified_err = _classify_instagram_error(res["error"])
                 sys.stderr.write(
                     f"[hyperdl][diag] Android Instagram download failed: "
                     f"{classified_err.get('redacted_diagnostic', '')}\n"

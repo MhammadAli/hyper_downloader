@@ -57,11 +57,6 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
-# Direct Cargokit integration for the shared Rust engine (avoids plugin symlink requirements on Windows).
-include("../cargokit/cmake/cargokit.cmake")
-apply_cargokit(engine_ffi_rust "../../../rust/crates/engine_ffi" engine_ffi "")
-list(APPEND PLUGIN_BUNDLED_LIBRARIES "${engine_ffi_rust_cargokit_lib}")
-
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can

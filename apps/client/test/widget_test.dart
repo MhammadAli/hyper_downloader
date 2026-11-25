@@ -2,1395 +2,566 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hyper_download_client/core/bridge/api.dart';
-import 'package:hyper_download_client/core/bridge/frb_generated.dart';
-import 'package:hyper_download_client/core/bridge/models.dart';
-import 'package:hyper_download_client/features/media_download/desktop_file_launcher.dart';
-import 'package:hyper_download_client/features/media_download/media_download_repository.dart';
+import 'package:hyper_download_client/core/error/app_exception.dart';
+import 'package:hyper_download_client/data/datasources/windows/windows_desktop_file_launcher.dart';
+import 'package:hyper_download_client/domain/entities/download_entities.dart';
+import 'package:hyper_download_client/domain/entities/media_entities.dart';
+import 'package:hyper_download_client/domain/entities/playlist_entities.dart';
+import 'package:hyper_download_client/domain/repositories/file_launcher_repository.dart';
+import 'package:hyper_download_client/domain/repositories/media_inspection_repository.dart';
+import 'package:hyper_download_client/domain/repositories/playlist_download_repository.dart';
+import 'package:hyper_download_client/domain/repositories/playlist_session_repository.dart';
+import 'package:hyper_download_client/domain/repositories/single_download_repository.dart';
 import 'package:hyper_download_client/main.dart';
 
-class FakeDesktopFileLauncher implements DesktopFileLauncher {
-  String? lastOpenedFile;
-  String? lastRevealedFile;
-
-  @override
-  Future<bool> openFile(String path) async {
-    lastOpenedFile = path;
-    return true;
-  }
-
-  @override
-  Future<bool> revealInFolder(String path) async {
-    lastRevealedFile = path;
-    return true;
-  }
-}
-
-class FakeMediaDownloadRepository implements MediaDownloadRepository {
-  final StreamController<DownloadProgressEvent> progressController =
-      StreamController<DownloadProgressEvent>.broadcast();
-  final StreamController<PlaylistProgressEvent> playlistProgressController =
-      StreamController<PlaylistProgressEvent>.broadcast();
-  final StreamController<PlaylistSizeEstimate> playlistSizeController =
-      StreamController<PlaylistSizeEstimate>.broadcast();
-
-  StartDownloadRequest? lastStartRequest;
-  String? lastCanceledJobId;
-  String? lastResumedJobId;
-  StartPlaylistDownloadRequest? lastPlaylistRequest;
-  String? lastPausedPlaylistId;
-  String? lastResumedPlaylistId;
-  String? lastCanceledPlaylistId;
-  String? lastRetriedPlaylistId;
-  String? lastCanceledSizeEstimationId;
-  bool shouldFailInspection = false;
-  bool returnMissingAudio = false;
-  bool returnProgressiveInstagramReel = false;
-  Completer<UrlInspectionResult>? inspectCompleter;
-  PlaylistSizeEstimate? initialBestPlaylistSizeEstimate;
-  String sampleTitle = 'Multi-Audio Test Presentation';
-  String samplePlaylistTitle = 'Blender HQ Tutorials';
-  String samplePlaylistFirstItemTitle = 'Episode One';
-
-  @override
-  String ping() => 'pong';
-
-  @override
-  String engineVersion() => '0.1.0';
+class _TestInspectionRepo implements MediaInspectionRepository {
+  Future<UrlInspectionResult> Function(String url)? onInspectUrl;
 
   @override
   Future<UrlInspectionResult> inspectUrl(String url) async {
-    if (inspectCompleter != null) {
-      return inspectCompleter!.future;
-    }
-    if (shouldFailInspection) {
-      throw Exception('Simulated extraction failure');
-    }
-
-    if (url.contains('playlist?list=')) {
-      return UrlInspectionResult(
-        kind: InspectionTargetKind.playlist,
-        playlist: PlaylistInspection(
-          id: 'PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
-          title: samplePlaylistTitle,
-          uploader: 'Blender Foundation',
-          thumbnailUrl: null,
-          webpageUrl: url,
-          providerName: 'Youtube',
-          totalItemCount: 3,
-          entries: [
-            PlaylistEntrySummary(
-              orderIndex: 0,
-              videoId: 'vid0',
-              title: samplePlaylistFirstItemTitle,
-              url: 'https://www.youtube.com/watch?v=vid0',
-              uploader: 'Blender Foundation',
-              durationSeconds: 95.0,
-              availability: PlaylistEntryAvailability.available,
-            ),
-            const PlaylistEntrySummary(
-              orderIndex: 1,
-              videoId: 'priv1',
-              title: '[Private video]',
-              url: 'https://www.youtube.com/watch?v=priv1',
-              availability: PlaylistEntryAvailability.private,
-              availabilityReason: 'Private video is inaccessible.',
-            ),
-            const PlaylistEntrySummary(
-              orderIndex: 2,
-              videoId: 'vid2',
-              title: 'Episode Two',
-              url: 'https://www.youtube.com/watch?v=vid2',
-              uploader: 'Blender Foundation',
-              durationSeconds: 140.0,
-              availability: PlaylistEntryAvailability.available,
-            ),
-          ],
-        ),
-      );
-    }
-
-    final single = await inspectMedia(url);
-    return UrlInspectionResult(
-      kind: InspectionTargetKind.singleVideo,
-      video: single,
-    );
+    if (onInspectUrl != null) return onInspectUrl!(url);
+    throw const InvalidUrlException('Unconfigured inspection stub');
   }
 
   @override
-  Future<MediaInspection> inspectMedia(String url) async {
-    if (shouldFailInspection) {
-      throw Exception('Simulated extraction failure');
-    }
+  Future<MediaInspection> inspectMedia(String url) => throw UnimplementedError();
 
-    if (returnMissingAudio) {
-      return MediaInspection(
-        id: 'silent-1',
-        title: 'Silent Test Video',
-        uploader: 'Creator',
-        durationSeconds: 120.0,
-        thumbnailUrl: null,
-        webpageUrl: url,
-        providerName: 'Youtube',
-        originalAudio: null,
-        videoOptions: const [],
-        audioOptions: const [],
-        formats: const [],
-      );
-    }
+  @override
+  Future<PlaylistInspection> inspectPlaylist(String url) =>
+      throw UnimplementedError();
 
-    if (returnProgressiveInstagramReel) {
-      const igAudio = AudioTrackMetadata(
-        selectionConfidence: AudioSelectionConfidence.singleOrUnmarked,
-        statusNote: 'Audio included automatically',
-      );
-      return MediaInspection(
-        id: 'DTVTvUDj-b1',
-        title: 'Video by rahulmfg',
-        uploader: 'Rahul',
-        durationSeconds: null,
-        thumbnailUrl: null,
-        webpageUrl: 'https://www.instagram.com/reel/DTVTvUDj-b1/',
-        providerName: 'Instagram',
-        originalAudio: igAudio,
-        videoOptions: const [
-          VideoQualityOption(
-            resolution: '1080p',
-            height: 1080,
-            container: 'mp4',
-            displaySize: 'Unknown size',
-            sizeAccuracy: FileSizeAccuracy.unknown,
-            videoFormatId: '1',
-            audioLanguage: igAudio,
-            formatSelectionStrategy: FormatSelectionStrategy.combinedAudioVideo,
-          ),
-        ],
-        audioOptions: const [],
-        formats: const [],
-      );
-    }
+  @override
+  bool isRegisteredAudioOnlyFormat(String url, String formatId) => false;
+}
 
-    const audioMeta = AudioTrackMetadata(
-      language: 'en-US',
-      languageDisplayName: 'English (US)',
-      isOriginal: true,
-      isDefault: true,
-      isAutoDub: false,
-      selectionConfidence: AudioSelectionConfidence.confirmedOriginal,
-      statusNote: 'Audio included automatically · Original: English (US)',
-    );
+class _TestSessionRepo implements PlaylistSessionRepository {
+  PlaylistSessionSnapshot? saved;
 
-    return MediaInspection(
-      id: 'TsT1ntGyj4Q',
-      title: sampleTitle,
-      uploader: 'Channel Author',
-      durationSeconds: 1448.0,
-      thumbnailUrl: null,
-      webpageUrl: url,
-      providerName: 'Youtube',
-      originalAudio: audioMeta,
-      videoOptions: [
-        VideoQualityOption(
-          resolution: '1080p',
-          height: 1080,
-          fps: 50,
-          container: 'mp4',
-          displaySize: '142.34 MB (Exact)',
-          fileSizeBytes: BigInt.from(149254400),
-          sizeAccuracy: FileSizeAccuracy.exact,
-          videoFormatId: '299',
-          selectedAudioFormatId: '140-19',
-          audioLanguage: audioMeta,
-          formatSelectionStrategy:
-              FormatSelectionStrategy.pairVideoAndAudioWithFfmpeg,
-        ),
-        VideoQualityOption(
-          resolution: '360p',
-          height: 360,
-          fps: 30,
-          container: 'mp4',
-          displaySize: '~24.50 MB (Estimated)',
-          fileSizeBytes: BigInt.from(25690112),
-          sizeAccuracy: FileSizeAccuracy.estimated,
-          videoFormatId: '18',
-          selectedAudioFormatId: null,
-          audioLanguage: audioMeta,
-          formatSelectionStrategy: FormatSelectionStrategy.combinedAudioVideo,
-        ),
-      ],
-      audioOptions: [
-        AudioQualityOption(
-          qualityLabel: 'Standard Quality (129 kbps)',
-          container: 'm4a',
-          bitrateKbps: 129.5,
-          displaySize: '22.34 MB (Exact)',
-          fileSizeBytes: BigInt.from(23427071),
-          sizeAccuracy: FileSizeAccuracy.exact,
-          formatId: '140-19',
-          audioLanguage: audioMeta,
-        ),
-      ],
-      formats: const [],
-    );
+  @override
+  Future<PlaylistSessionSnapshot?> loadSavedSession({
+    required String playlistId,
+    String? outputDirectory,
+  }) async => saved;
+
+  @override
+  Future<void> saveSession({
+    required String playlistDirectory,
+    required PlaylistSessionSnapshot snapshot,
+  }) async {
+    saved = snapshot;
   }
+}
+
+class _TestSingleDownloadRepo implements SingleDownloadRepository {
+  final StreamController<DownloadProgressEvent> controller =
+      StreamController<DownloadProgressEvent>.broadcast();
+  StartDownloadRequest? lastRequest;
+  String? canceledJobId;
+  String? resumedJobId;
 
   @override
   Future<String> startDownload(StartDownloadRequest request) async {
-    lastStartRequest = request;
-    return 'fake-job-1';
+    lastRequest = request;
+    return 'dl-1';
   }
 
   @override
   Future<void> cancelDownload(String jobId) async {
-    lastCanceledJobId = jobId;
+    canceledJobId = jobId;
+    controller.add(
+      DownloadProgressEvent(
+        jobId: jobId,
+        phase: DownloadPhase.canceled,
+        downloadedBytes: 52428800,
+        totalBytes: 104857600,
+        isTotalEstimated: false,
+      ),
+    );
   }
 
   @override
   Future<String> resumeDownload(String jobId) async {
-    lastResumedJobId = jobId;
+    resumedJobId = jobId;
     return jobId;
   }
 
   @override
-  Stream<DownloadProgressEvent> watchDownloadProgress() =>
-      progressController.stream;
+  Stream<DownloadProgressEvent> watchDownloadProgress() => controller.stream;
+}
+
+class _TestPlaylistDownloadRepo implements PlaylistDownloadRepository {
+  final StreamController<PlaylistProgressEvent> progressController =
+      StreamController<PlaylistProgressEvent>.broadcast();
+  final StreamController<PlaylistSizeEstimate> sizeController =
+      StreamController<PlaylistSizeEstimate>.broadcast();
+
+  StartPlaylistDownloadRequest? lastRequest;
+  PlaylistSessionSnapshot? snapshotToReturn;
+  PlaylistSizeEstimate? estimateToReturn;
+  String? pausedSessionId;
+  String? resumedSessionId;
 
   @override
   Future<PlaylistSessionSnapshot> startPlaylistDownload(
     StartPlaylistDownloadRequest request,
   ) async {
-    lastPlaylistRequest = request;
-    return PlaylistSessionSnapshot(
-      sessionId: 'pl-session-fake',
-      playlistId: request.playlist.id,
-      playlistTitle: request.playlist.title,
-      playlistUrl: request.playlist.webpageUrl,
-      uploader: request.playlist.uploader,
-      thumbnailUrl: request.playlist.thumbnailUrl,
-      outputDirectory:
-          r'F:\Downloads\Blender HQ Tutorials [PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB]',
-      mediaMode: request.mediaMode,
-      qualityCap: request.qualityCap,
-      isRunning: true,
-      isPaused: false,
-      completedCount: 0,
-      failedCount: 0,
-      skippedCount: 1,
-      totalCount: request.playlist.totalItemCount,
-      items: request.playlist.entries
-          .map(
-            (e) => PlaylistItemState(
-              orderIndex: e.orderIndex,
-              videoId: e.videoId,
-              title: e.title,
-              url: e.url,
-              durationSeconds: e.durationSeconds,
-              status: e.availability == PlaylistEntryAvailability.available
-                  ? PlaylistItemStatus.pending
-                  : PlaylistItemStatus.skipped,
-              downloadedBytes: BigInt.zero,
-              isTotalEstimated: false,
-              errorMessage: e.availabilityReason,
-            ),
-          )
-          .toList(growable: false),
-    );
+    lastRequest = request;
+    return snapshotToReturn!;
   }
 
   @override
   Future<void> pausePlaylistDownload(String sessionId) async {
-    lastPausedPlaylistId = sessionId;
+    pausedSessionId = sessionId;
   }
 
   @override
   Future<PlaylistSessionSnapshot> resumePlaylistDownload(
     String sessionId,
   ) async {
-    lastResumedPlaylistId = sessionId;
-    return startPlaylistDownload(lastPlaylistRequest!);
+    resumedSessionId = sessionId;
+    return snapshotToReturn!;
   }
 
   @override
-  Future<void> cancelPlaylistDownload(String sessionId) async {
-    lastCanceledPlaylistId = sessionId;
-  }
+  Future<void> cancelPlaylistDownload(String sessionId) async {}
 
   @override
   Future<PlaylistSessionSnapshot> retryFailedPlaylistItems(
     String sessionId,
-  ) async {
-    lastRetriedPlaylistId = sessionId;
-    return startPlaylistDownload(lastPlaylistRequest!);
-  }
-
-  @override
-  Future<PlaylistSessionSnapshot?> loadSavedPlaylistSession({
-    required String playlistId,
-    String? outputDirectory,
-  }) async => null;
+  ) async => snapshotToReturn!;
 
   @override
   Stream<PlaylistProgressEvent> watchPlaylistProgress() =>
-      playlistProgressController.stream;
+      progressController.stream;
 
   @override
   Future<PlaylistSizeEstimate> estimatePlaylistSize(
     EstimatePlaylistSizeRequest request,
-  ) async {
-    if (request.mediaMode == PlaylistMediaMode.audioOnly) {
-      return PlaylistSizeEstimate(
-        estimationId: 'est-audio',
-        playlistId: request.playlist.id,
-        mediaMode: request.mediaMode,
-        qualityCap: request.qualityCap,
-        status: PlaylistSizeStatus.exact,
-        knownTotalBytes: BigInt.from(8388608),
-        totalEntriesCount: request.playlist.entries.length,
-        unavailableCount: 1,
-        eligibleCount: 2,
-        inspectedCount: 2,
-        exactCount: 2,
-        estimatedCount: 0,
-        unknownCount: 0,
-        failedCount: 0,
-        displaySummary: '8.00 MB (Exact)',
-        statusMessage: '2 accessible video(s) with exact sizes.',
-        itemSizes: [
-          PlaylistItemSizeInfo(
-            orderIndex: 0,
-            selectedQuality: 'M4A · Standard Quality (129 kbps)',
-            expectedSizeBytes: BigInt.from(4194304),
-            sizeAccuracy: FileSizeAccuracy.exact,
-            displaySize: '4.00 MB (Exact)',
-            failed: false,
-          ),
-          PlaylistItemSizeInfo(
-            orderIndex: 2,
-            selectedQuality: 'M4A · Standard Quality (129 kbps)',
-            expectedSizeBytes: BigInt.from(4194304),
-            sizeAccuracy: FileSizeAccuracy.exact,
-            displaySize: '4.00 MB (Exact)',
-            failed: false,
-          ),
-        ],
-      );
-    }
-
-    if (request.qualityCap == PlaylistQualityCap.upTo720P) {
-      return PlaylistSizeEstimate(
-        estimationId: 'est-720p',
-        playlistId: request.playlist.id,
-        mediaMode: request.mediaMode,
-        qualityCap: request.qualityCap,
-        status: PlaylistSizeStatus.partial,
-        knownTotalBytes: BigInt.from(31457280),
-        totalEntriesCount: request.playlist.entries.length,
-        unavailableCount: 1,
-        eligibleCount: 2,
-        inspectedCount: 2,
-        exactCount: 0,
-        estimatedCount: 1,
-        unknownCount: 1,
-        failedCount: 0,
-        displaySummary: 'At least 30.00 MB · 1 unknown',
-        statusMessage: 'At least 30.00 MB · 1 video(s) have unknown sizes.',
-        itemSizes: [
-          PlaylistItemSizeInfo(
-            orderIndex: 0,
-            selectedQuality: '720p MP4',
-            expectedSizeBytes: BigInt.from(31457280),
-            sizeAccuracy: FileSizeAccuracy.estimated,
-            displaySize: '~30.00 MB (Estimated)',
-            failed: false,
-          ),
-          const PlaylistItemSizeInfo(
-            orderIndex: 2,
-            selectedQuality: '720p MP4',
-            expectedSizeBytes: null,
-            sizeAccuracy: FileSizeAccuracy.unknown,
-            displaySize: 'Unknown size',
-            failed: false,
-          ),
-        ],
-      );
-    }
-
-    return initialBestPlaylistSizeEstimate ??
-        PlaylistSizeEstimate(
-          estimationId: 'est-best',
-          playlistId: request.playlist.id,
-          mediaMode: request.mediaMode,
-          qualityCap: request.qualityCap,
-          status: PlaylistSizeStatus.calculating,
-          knownTotalBytes: BigInt.from(52428800),
-          totalEntriesCount: request.playlist.entries.length,
-          unavailableCount: 1,
-          eligibleCount: 2,
-          inspectedCount: 1,
-          exactCount: 0,
-          estimatedCount: 1,
-          unknownCount: 0,
-          failedCount: 0,
-          displaySummary: 'Calculating playlist size...',
-          statusMessage: 'Calculating sizes: 1 / 2 videos',
-          itemSizes: const [],
-        );
-  }
+  ) async => estimateToReturn!;
 
   @override
-  Future<void> cancelPlaylistSizeEstimation(String estimationId) async {
-    lastCanceledSizeEstimationId = estimationId;
-  }
+  Future<void> cancelPlaylistSizeEstimation(String estimationId) async {}
 
   @override
   Stream<PlaylistSizeEstimate> watchPlaylistSizeEstimate() =>
-      playlistSizeController.stream;
+      sizeController.stream;
+}
 
-  Future<void> dispose() async {
-    await progressController.close();
-    await playlistProgressController.close();
-    await playlistSizeController.close();
+class _TestFileLauncher implements FileLauncherRepository {
+  String? openedPath;
+  String? revealedPath;
+
+  @override
+  Future<bool> openFile(String path) async {
+    openedPath = path;
+    return true;
   }
+
+  @override
+  Future<bool> revealInFolder(String path) async {
+    revealedPath = path;
+    return true;
+  }
+
+  @override
+  Future<bool> shareFile(String path) async => true;
+}
+
+MediaInspection _videoInspection({
+  String id = 'vid1',
+  String title = 'Flutter Clean Architecture Demo',
+  String provider = 'YouTube',
+  bool silent = false,
+}) {
+  return MediaInspection(
+    id: id,
+    title: title,
+    uploader: 'Hyper Channel',
+    durationSeconds: 185,
+    webpageUrl: 'https://www.youtube.com/watch?v=$id',
+    providerName: provider,
+    videoOptions: [
+      VideoQualityOption(
+        resolution: '1080p',
+        height: 1080,
+        container: 'mp4',
+        displaySize: '120.0 MB',
+        fileSizeBytes: 125829120,
+        sizeAccuracy: FileSizeAccuracy.exact,
+        videoFormatId: '137',
+        selectedAudioFormatId: silent ? null : '140',
+        formatSelectionStrategy: silent
+            ? FormatSelectionStrategy.combinedAudioVideo
+            : FormatSelectionStrategy.pairVideoAndAudioWithFfmpeg,
+      ),
+    ],
+    audioOptions: silent
+        ? const []
+        : const [
+            AudioQualityOption(
+              qualityLabel: '128 kbps',
+              container: 'm4a',
+              bitrateKbps: 128,
+              displaySize: '5.0 MB',
+              fileSizeBytes: 5242880,
+              sizeAccuracy: FileSizeAccuracy.exact,
+              formatId: '140',
+            ),
+          ],
+    formats: const [],
+  );
 }
 
 void main() {
-  test(
-    'Flutter-to-Rust Debug DLL responds to ping and engineVersion',
-    () async {
-      final debugDll = File('../../rust/target/debug/engine_ffi.dll');
-      expect(debugDll.existsSync(), isTrue);
+  testWidgets('single video analyze, download, pause, resume, and complete', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1100, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
 
-      await RustLib.init(
-        externalLibrary: ExternalLibrary.open(debugDll.absolute.path),
-      );
-
-      expect(ping(), 'pong');
-      expect(engineVersion(), '0.1.0');
-
-      RustLib.dispose();
-    },
-  );
-
-  testWidgets(
-    'HyperDownloadApp initializes cleanly from Rust Debug DLL without pong badge',
-    (WidgetTester tester) async {
-      final debugDll = File('../../rust/target/debug/engine_ffi.dll');
-      expect(debugDll.existsSync(), isTrue);
-
-      await tester.runAsync(() async {
-        await RustLib.init(
-          externalLibrary: ExternalLibrary.open(debugDll.absolute.path),
-        );
-      });
-
-      await tester.pumpWidget(const HyperDownloadApp());
-      await tester.pump();
-
-      expect(find.text('HyperDownload'), findsOneWidget);
-      expect(find.textContaining('pong'), findsNothing);
-      expect(find.byKey(const Key('error_banner')), findsNothing);
-      final scaffoldCtx = tester.element(find.byType(Scaffold));
-      expect(Theme.of(scaffoldCtx).brightness, Brightness.dark);
-
-      await tester.pumpWidget(const SizedBox.shrink());
-      RustLib.dispose();
-    },
-  );
-
-  test(
-    'Flutter-to-Rust Release DLL responds to ping and engineVersion',
-    () async {
-      final releaseDll = File('../../rust/target/release/engine_ffi.dll');
-      expect(releaseDll.existsSync(), isTrue);
-
-      await RustLib.init(
-        externalLibrary: ExternalLibrary.open(releaseDll.absolute.path),
-      );
-
-      expect(ping(), 'pong');
-      expect(engineVersion(), '0.1.0');
-
-      RustLib.dispose();
-    },
-  );
-
-  group('Phase 2C Refined Desktop MediaDownloadScreen UI', () {
-    late FakeMediaDownloadRepository fakeRepo;
-    late FakeDesktopFileLauncher fakeLauncher;
-
-    setUp(() {
-      fakeRepo = FakeMediaDownloadRepository();
-      fakeLauncher = FakeDesktopFileLauncher();
+    final inspectRepo = _TestInspectionRepo();
+    final sessionRepo = _TestSessionRepo();
+    final singleRepo = _TestSingleDownloadRepo();
+    final playlistRepo = _TestPlaylistDownloadRepo();
+    final launcher = _TestFileLauncher();
+    addTearDown(() async {
+      await singleRepo.controller.close();
+      await playlistRepo.progressController.close();
+      await playlistRepo.sizeController.close();
     });
 
-    tearDown(() async {
-      await fakeRepo.dispose();
-    });
-
-    testWidgets(
-      'supports Video with Sound default, Pause -> Resume, Audio Only, and Open Folder / File actions',
-      (WidgetTester tester) async {
-        await tester.pumpWidget(
-          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
-        );
-        await tester.pump();
-
-        expect(find.textContaining('pong'), findsNothing);
-
-        await tester.enterText(
-          find.byKey(const Key('url_input_field')),
-          'https://www.youtube.com/shorts/aqz-KE-bpKQ',
-        );
-        await tester.tap(find.byKey(const Key('analyze_url_button')));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Multi-Audio Test Presentation'), findsOneWidget);
-        expect(
-          find.text('Audio included automatically · Original: English (US)'),
-          findsOneWidget,
-        );
-        expect(find.text('Video with Sound'), findsOneWidget);
-        expect(find.text('Audio Only'), findsOneWidget);
-        expect(find.text('1080p'), findsOneWidget);
-        expect(find.text('50 fps'), findsOneWidget);
-        expect(find.text('142.34 MB (Exact)'), findsOneWidget);
-
-        // Raw format IDs and codec details must stay hidden.
-        expect(find.textContaining('299'), findsNothing);
-        expect(find.textContaining('140-19'), findsNothing);
-        expect(find.textContaining('avc1'), findsNothing);
-
-        // Start download.
-        await tester.ensureVisible(
-          find.byKey(const Key('start_download_button')),
-        );
-        await tester.tap(find.byKey(const Key('start_download_button')));
-        await tester.pump();
-
-        // Stream live progress -> test Pause -> Paused -> Resume.
-        fakeRepo.progressController.add(
-          DownloadProgressEvent(
-            jobId: 'fake-job-1',
-            phase: DownloadPhase.downloading,
-            downloadedBytes: BigInt.from(74627200),
-            totalBytes: BigInt.from(149254400),
-            isTotalEstimated: false,
-            speedBytesPerSec: 2097152.0,
-            etaSeconds: BigInt.from(35),
-          ),
-        );
-        await tester.pump();
-
-        expect(find.text('Downloading'), findsOneWidget);
-        expect(find.text('50%'), findsOneWidget);
-        expect(find.text('Transferred: 71.17 MB / 142.34 MB'), findsOneWidget);
-
-        await tester.tap(find.byKey(const Key('pause_download_button')));
-        await tester.pump();
-        expect(fakeRepo.lastCanceledJobId, 'fake-job-1');
-
-        fakeRepo.progressController.add(
-          DownloadProgressEvent(
-            jobId: 'fake-job-1',
-            phase: DownloadPhase.canceled,
-            downloadedBytes: BigInt.from(74627200),
-            totalBytes: BigInt.from(149254400),
-            isTotalEstimated: false,
-          ),
-        );
-        await tester.pump();
-
-        expect(find.text('Paused'), findsOneWidget);
-
-        await tester.tap(find.byKey(const Key('resume_download_button')));
-        await tester.pump();
-        expect(fakeRepo.lastResumedJobId, 'fake-job-1');
-
-        // Complete download and verify Open Folder / Open File actions.
-        const savedPath =
-            r'F:\Downloads\شفرة أمريكا - [TsT1ntGyj4Q] [299+140-19].mp4';
-        fakeRepo.progressController.add(
-          DownloadProgressEvent(
-            jobId: 'fake-job-1',
-            phase: DownloadPhase.completed,
-            downloadedBytes: BigInt.from(149254400),
-            totalBytes: BigInt.from(149254400),
-            isTotalEstimated: false,
-            outputPath: savedPath,
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        expect(find.text('Completed'), findsOneWidget);
-        expect(find.byKey(const Key('completed_file_panel')), findsOneWidget);
-
-        await tester.ensureVisible(find.byKey(const Key('open_folder_button')));
-        await tester.tap(find.byKey(const Key('open_folder_button')));
-        await tester.pump();
-        expect(fakeLauncher.lastRevealedFile, savedPath);
-
-        await tester.tap(find.byKey(const Key('open_file_button')));
-        await tester.pump();
-        expect(fakeLauncher.lastOpenedFile, savedPath);
-
-        // Switch to Audio Only mode cleanly.
-        await tester.ensureVisible(find.text('Audio Only'));
-        await tester.tap(find.text('Audio Only'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Standard Quality (129 kbps)'), findsOneWidget);
-        expect(find.text('M4A'), findsOneWidget);
-        expect(find.text('22.34 MB (Exact)'), findsOneWidget);
-      },
+    inspectRepo.onInspectUrl = (_) async => UrlInspectionResult(
+      kind: InspectionTargetKind.singleVideo,
+      video: _videoInspection(),
     );
 
-    testWidgets(
-      'renders long Arabic titles and narrow resized windows without overflow',
-      (WidgetTester tester) async {
-        tester.view.physicalSize = const Size(460, 760);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        fakeRepo.sampleTitle =
-            'شفرة أمريكا: لماذا يرتعب الأمريكي من الإجازة أو المرض - وهم الحلم الأمريكي الطويل جدا للاختبار';
-
-        await tester.pumpWidget(
-          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
-        );
-        await tester.pump();
-
-        await tester.enterText(
-          find.byKey(const Key('url_input_field')),
-          'https://www.youtube.com/watch?v=TsT1ntGyj4Q',
-        );
-        await tester.tap(find.byKey(const Key('analyze_url_button')));
-        await tester.pumpAndSettle();
-
-        expect(find.textContaining('شفرة أمريكا'), findsOneWidget);
-      },
+    await tester.pumpWidget(
+      HyperDownloadApp(
+        inspectionRepository: inspectRepo,
+        playlistSessionRepository: sessionRepo,
+        singleDownloadRepository: singleRepo,
+        playlistDownloadRepository: playlistRepo,
+        fileLauncher: launcher,
+        getInitialSharedUrl: () async => null,
+        sharedUrls: const Stream.empty(),
+      ),
     );
+    await tester.pumpAndSettle();
 
-    testWidgets(
-      'displays clear unavailable message when audio track is missing',
-      (WidgetTester tester) async {
-        fakeRepo.returnMissingAudio = true;
-        await tester.pumpWidget(
-          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
-        );
-        await tester.pump();
-
-        await tester.enterText(
-          find.byKey(const Key('url_input_field')),
-          'https://example.com/silent',
-        );
-        await tester.tap(find.byKey(const Key('analyze_url_button')));
-        await tester.pumpAndSettle();
-
-        expect(
-          find.byKey(const Key('empty_video_options_message')),
-          findsOneWidget,
-        );
-      },
+    await tester.enterText(
+      find.byKey(const Key('url_input_field')),
+      'https://www.youtube.com/watch?v=vid1',
     );
+    await tester.tap(find.byKey(const Key('analyze_url_button')));
+    await tester.pumpAndSettle();
 
-    testWidgets('shows error banner when URL analysis fails', (
-      WidgetTester tester,
-    ) async {
-      fakeRepo.shouldFailInspection = true;
-      await tester.pumpWidget(
-        HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
-      );
-      await tester.pump();
+    expect(find.text('Flutter Clean Architecture Demo'), findsOneWidget);
+    expect(find.text('1080p'), findsOneWidget);
 
-      await tester.enterText(
-        find.byKey(const Key('url_input_field')),
-        'https://www.youtube.com/watch?v=invalid',
-      );
-      await tester.tap(find.byKey(const Key('analyze_url_button')));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start_download_button')));
+    await tester.pump();
+    expect(singleRepo.lastRequest, isNotNull);
 
-      expect(find.byKey(const Key('error_banner')), findsOneWidget);
-      expect(
-        find.textContaining('Simulated extraction failure'),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets(
-      'supports full playlist workflow: mode, quality caps, skipped items, live progress without overall ETA, failure retry, pause/resume/cancel, and folder actions',
-      (WidgetTester tester) async {
-        await tester.pumpWidget(
-          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
-        );
-        await tester.pump();
-
-        await tester.enterText(
-          find.byKey(const Key('url_input_field')),
-          'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
-        );
-        await tester.tap(find.byKey(const Key('analyze_url_button')));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 350));
-
-        expect(find.byKey(const Key('playlist_header_card')), findsOneWidget);
-        expect(find.text('Blender HQ Tutorials'), findsOneWidget);
-        expect(find.text('3 items'), findsOneWidget);
-        expect(find.text('1 unavailable'), findsOneWidget);
-        expect(find.text('Skipped'), findsOneWidget);
-        expect(find.byKey(const Key('playlist_items_card')), findsOneWidget);
-
-        // Verify initial calculating playlist size banner + cancel, then dynamic recalculation on mode & cap toggles.
-        expect(
-          find.byKey(const Key('playlist_size_summary_card')),
-          findsOneWidget,
-        );
-        expect(find.text('Calculating playlist size...'), findsOneWidget);
-        expect(find.text('Calculating sizes: 1 / 2 videos'), findsOneWidget);
-
-        await tester.ensureVisible(
-          find.byKey(const Key('cancel_size_estimation_button')),
-        );
-        await tester.tap(
-          find.byKey(const Key('cancel_size_estimation_button')),
-        );
-        await tester.pump();
-        expect(fakeRepo.lastCanceledSizeEstimationId, 'est-best');
-
-        // Verify default mode & quality cap chips, toggle Audio Only and back.
-        expect(find.text('Best Available'), findsOneWidget);
-        expect(find.text('Up to 1080p'), findsOneWidget);
-        expect(find.text('Up to 720p'), findsOneWidget);
-        expect(find.text('Up to 480p'), findsOneWidget);
-
-        await tester.ensureVisible(find.text('Audio Only'));
-        await tester.tap(find.text('Audio Only'));
-        await tester.pumpAndSettle();
-        expect(find.text('Up to 720p'), findsNothing);
-        expect(find.text('8.00 MB (Exact)'), findsOneWidget);
-        expect(find.text('2 exact'), findsOneWidget);
-
-        await tester.ensureVisible(find.text('Video with Sound'));
-        await tester.tap(find.text('Video with Sound'));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 350));
-        await tester.ensureVisible(find.text('Up to 720p'));
-        await tester.tap(find.text('Up to 720p'));
-        await tester.pumpAndSettle();
-        expect(find.text('At least 30.00 MB · 1 unknown'), findsOneWidget);
-        expect(find.text('2 included'), findsOneWidget);
-        expect(find.text('1 unknown'), findsOneWidget);
-        expect(find.text('1 skipped'), findsOneWidget);
-
-        // Start playlist download.
-        await tester.ensureVisible(
-          find.byKey(const Key('start_playlist_button')),
-        );
-        await tester.tap(find.byKey(const Key('start_playlist_button')));
-        await tester.pumpAndSettle();
-
-        expect(
-          fakeRepo.lastPlaylistRequest?.qualityCap,
-          PlaylistQualityCap.upTo720P,
-        );
-        expect(
-          find.byKey(const Key('playlist_overall_progress')),
-          findsOneWidget,
-        );
-        expect(find.text('0 / 3 completed'), findsOneWidget);
-
-        // Active item progress & completion (no raw format IDs, no overall playlist ETA).
-        const item0Path =
-            r'F:\Downloads\Blender HQ Tutorials [PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB]\001 - Episode One.mp4';
-        fakeRepo.playlistProgressController.add(
-          PlaylistProgressEvent(
-            sessionId: 'pl-session-fake',
-            kind: PlaylistEventKind.playlistItemProgress,
-            itemIndex: 0,
-            itemStatus: PlaylistItemStatus.downloading,
-            selectedQuality: '720p MP4',
-            audioLanguage: const AudioTrackMetadata(
-              language: 'en',
-              languageDisplayName: 'English',
-              isOriginal: true,
-              isDefault: true,
-              isAutoDub: false,
-              selectionConfidence: AudioSelectionConfidence.confirmedOriginal,
-              statusNote: 'Audio included automatically · Original: English',
-            ),
-            itemDownloadedBytes: BigInt.from(5242880),
-            itemTotalBytes: BigInt.from(10485760),
-            itemIsTotalEstimated: false,
-            speedBytesPerSec: 1048576.0,
-            etaSeconds: BigInt.from(5),
-            completedCount: 0,
-            failedCount: 0,
-            skippedCount: 1,
-            totalCount: 3,
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        expect(
-          find.byKey(const Key('playlist_active_item_panel')),
-          findsOneWidget,
-        );
-        expect(find.text('Quality: 720p MP4'), findsOneWidget);
-        expect(find.text('Item ETA: 00:05'), findsOneWidget);
-        expect(find.textContaining('Overall ETA'), findsNothing);
-        expect(find.textContaining('140-19'), findsNothing);
-
-        // Pause -> Resume controls.
-        await tester.tap(find.byKey(const Key('pause_playlist_button')));
-        await tester.pump();
-        expect(fakeRepo.lastPausedPlaylistId, 'pl-session-fake');
-
-        fakeRepo.playlistProgressController.add(
-          PlaylistProgressEvent(
-            sessionId: 'pl-session-fake',
-            kind: PlaylistEventKind.playlistPaused,
-            itemIndex: 0,
-            itemStatus: PlaylistItemStatus.canceled,
-            itemDownloadedBytes: BigInt.from(5242880),
-            itemTotalBytes: BigInt.from(10485760),
-            itemIsTotalEstimated: false,
-            completedCount: 0,
-            failedCount: 0,
-            skippedCount: 1,
-            totalCount: 3,
-            message: 'Playlist paused.',
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        await tester.tap(find.byKey(const Key('resume_playlist_button')));
-        await tester.pump();
-        expect(fakeRepo.lastResumedPlaylistId, 'pl-session-fake');
-
-        // Item 0 completes; Item 2 fails -> Retry Failed becomes enabled.
-        fakeRepo.playlistProgressController.add(
-          PlaylistProgressEvent(
-            sessionId: 'pl-session-fake',
-            kind: PlaylistEventKind.playlistItemCompleted,
-            itemIndex: 0,
-            itemStatus: PlaylistItemStatus.completed,
-            selectedQuality: '720p MP4',
-            itemDownloadedBytes: BigInt.from(10485760),
-            itemTotalBytes: BigInt.from(10485760),
-            itemIsTotalEstimated: false,
-            outputPath: item0Path,
-            completedCount: 1,
-            failedCount: 0,
-            skippedCount: 1,
-            totalCount: 3,
-          ),
-        );
-        fakeRepo.playlistProgressController.add(
-          PlaylistProgressEvent(
-            sessionId: 'pl-session-fake',
-            kind: PlaylistEventKind.playlistItemFailed,
-            itemIndex: 2,
-            itemStatus: PlaylistItemStatus.failed,
-            itemDownloadedBytes: BigInt.zero,
-            itemIsTotalEstimated: false,
-            completedCount: 1,
-            failedCount: 1,
-            skippedCount: 1,
-            totalCount: 3,
-            message: 'Network timeout',
-          ),
-        );
-        fakeRepo.playlistProgressController.add(
-          PlaylistProgressEvent(
-            sessionId: 'pl-session-fake',
-            kind: PlaylistEventKind.playlistCompleted,
-            itemDownloadedBytes: BigInt.zero,
-            itemIsTotalEstimated: false,
-            completedCount: 1,
-            failedCount: 1,
-            skippedCount: 1,
-            totalCount: 3,
-            message: 'Batch finished with 1 failed.',
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        expect(find.text('1 / 3 completed'), findsOneWidget);
-        expect(find.text('1 failed'), findsOneWidget);
-        expect(find.text('Network timeout'), findsOneWidget);
-
-        // Reveal overall playlist folder & item folder.
-        await tester.ensureVisible(
-          find.byKey(const Key('playlist_open_folder_button')),
-        );
-        await tester.tap(find.byKey(const Key('playlist_open_folder_button')));
-        await tester.pump();
-        expect(
-          fakeLauncher.lastRevealedFile,
-          r'F:\Downloads\Blender HQ Tutorials [PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB]',
-        );
-
-        await tester.ensureVisible(
-          find.byKey(const Key('playlist_item_folder_0')),
-        );
-        await tester.tap(find.byKey(const Key('playlist_item_folder_0')));
-        await tester.pump();
-        expect(fakeLauncher.lastRevealedFile, item0Path);
-
-        // Trigger Retry Failed -> then Cancel.
-        await tester.ensureVisible(
-          find.byKey(const Key('retry_failed_playlist_button')),
-        );
-        await tester.tap(find.byKey(const Key('retry_failed_playlist_button')));
-        await tester.pumpAndSettle();
-        expect(fakeRepo.lastRetriedPlaylistId, 'pl-session-fake');
-
-        await tester.tap(find.byKey(const Key('cancel_playlist_button')));
-        await tester.pump();
-        expect(fakeRepo.lastCanceledPlaylistId, 'pl-session-fake');
-      },
+    singleRepo.controller.add(
+      const DownloadProgressEvent(
+        jobId: 'dl-1',
+        phase: DownloadPhase.downloading,
+        downloadedBytes: 52428800,
+        totalBytes: 104857600,
+        isTotalEstimated: false,
+        speedBytesPerSec: 2097152,
+        etaSeconds: 25,
+      ),
     );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
 
-    testWidgets(
-      'renders long Arabic RTL playlist and item titles in narrow 460px windows without overflow',
-      (WidgetTester tester) async {
-        tester.view.physicalSize = const Size(460, 760);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
+    expect(find.byKey(const Key('download_progress_bar')), findsOneWidget);
+    expect(find.text('50%'), findsOneWidget);
 
-        fakeRepo.samplePlaylistTitle =
-            'قائمة تشغيل تعليمية شاملة باللغة العربية لتعلم البرمجة وتطوير التطبيقات الحديثة خطوة بخطوة';
-        fakeRepo.samplePlaylistFirstItemTitle =
-            'الدرس الأول: شرح كامل ومفصل لكيفية التعامل مع قوائم التشغيل الطويلة باللغة العربية دون أي مشاكل';
+    await tester.tap(find.byKey(const Key('pause_download_button')));
+    await tester.pump();
+    expect(singleRepo.canceledJobId, 'dl-1');
 
-        await tester.pumpWidget(
-          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
-        );
-        await tester.pump();
+    await tester.tap(find.byKey(const Key('resume_download_button')));
+    await tester.pump();
+    expect(singleRepo.resumedJobId, 'dl-1');
 
-        await tester.enterText(
-          find.byKey(const Key('url_input_field')),
-          'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
-        );
-        await tester.tap(find.byKey(const Key('analyze_url_button')));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 350));
-
-        expect(find.textContaining('قائمة تشغيل تعليمية'), findsOneWidget);
-        expect(find.textContaining('الدرس الأول'), findsOneWidget);
-      },
+    singleRepo.controller.add(
+      const DownloadProgressEvent(
+        jobId: 'dl-1',
+        phase: DownloadPhase.completed,
+        downloadedBytes: 104857600,
+        totalBytes: 104857600,
+        isTotalEstimated: false,
+        outputPath: r'C:\Downloads\Demo.mp4',
+      ),
     );
+    await tester.pumpAndSettle();
 
-    test(
-      'WindowsDesktopFileLauncher resolves Win32 Shell PIDL for files with spaces, brackets, and Unicode',
-      () async {
-        final tempDir = await Directory.systemTemp.createTemp(
-          'hyperdl_reveal_test [PL123] ',
-        );
-        try {
-          final file = File(
-            '${tempDir.path}${Platform.pathSeparator}001 - Empty Out Your Pockets شفرة.mp4',
-          );
-          await file.writeAsBytes(const [0, 1, 2, 3]);
-          expect(canCreateShellItemIdListForFile(file.path), isTrue);
-
-          const launcher = WindowsDesktopFileLauncher();
-          expect(
-            await launcher.revealInFolder(
-              '${tempDir.path}${Platform.pathSeparator}missing_subfolder${Platform.pathSeparator}nope.mp4',
-            ),
-            isFalse,
-          );
-        } finally {
-          await tempDir.delete(recursive: true);
-        }
-      },
-    );
-
-    testWidgets(
-      'displays Instagram badge cleanly and hides Audio Only when audioOptions is empty',
-      (WidgetTester tester) async {
-        fakeRepo.returnProgressiveInstagramReel = true;
-        await tester.pumpWidget(
-          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
-        );
-        await tester.pump();
-
-        await tester.enterText(
-          find.byKey(const Key('url_input_field')),
-          'https://www.instagram.com/reel/DTVTvUDj-b1/',
-        );
-        await tester.tap(find.byKey(const Key('analyze_url_button')));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Instagram'), findsOneWidget);
-        expect(find.text('Video by rahulmfg'), findsOneWidget);
-        expect(find.text('1080p'), findsOneWidget);
-        expect(find.text('Audio included automatically'), findsOneWidget);
-        expect(find.byKey(const Key('media_mode_toggle')), findsNothing);
-        expect(find.text('Audio Only'), findsNothing);
-        expect(find.byKey(const Key('video_only_mode_badge')), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      'displays Preparing/Connecting/Resolving instead of Analyzing after pressing Download and disables Pause until first byte',
-      (WidgetTester tester) async {
-        fakeRepo.returnProgressiveInstagramReel = true;
-        await tester.pumpWidget(
-          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
-        );
-        await tester.pump();
-
-        await tester.enterText(
-          find.byKey(const Key('url_input_field')),
-          'https://www.instagram.com/reel/DTVTvUDj-b1/',
-        );
-        await tester.tap(find.byKey(const Key('analyze_url_button')));
-        await tester.pumpAndSettle();
-
-        await tester.ensureVisible(
-          find.byKey(const Key('start_download_button')),
-        );
-        await tester.tap(find.byKey(const Key('start_download_button')));
-        await tester.pump();
-
-        expect(find.text('Preparing'), findsOneWidget);
-        expect(find.text('Analyzing'), findsNothing);
-        expect(
-          tester
-              .widget<FilledButton>(
-                find.byKey(const Key('pause_download_button')),
-              )
-              .onPressed,
-          isNull,
-        );
-        expect(
-          tester
-              .widget<OutlinedButton>(
-                find.byKey(const Key('cancel_download_button')),
-              )
-              .onPressed,
-          isNotNull,
-        );
-
-        fakeRepo.progressController.add(
-          DownloadProgressEvent(
-            jobId: 'fake-job-1',
-            phase: DownloadPhase.analyzing,
-            downloadedBytes: BigInt.zero,
-            isTotalEstimated: false,
-            message: 'Connecting to Instagram...',
-          ),
-        );
-        await tester.pump(const Duration(milliseconds: 250));
-        expect(find.text('Connecting'), findsOneWidget);
-        expect(find.text('Analyzing'), findsNothing);
-        expect(
-          tester
-              .widget<FilledButton>(
-                find.byKey(const Key('pause_download_button')),
-              )
-              .onPressed,
-          isNull,
-        );
-
-        fakeRepo.progressController.add(
-          DownloadProgressEvent(
-            jobId: 'fake-job-1',
-            phase: DownloadPhase.analyzing,
-            downloadedBytes: BigInt.zero,
-            isTotalEstimated: false,
-            message: 'Resolving media...',
-          ),
-        );
-        await tester.pump(const Duration(milliseconds: 250));
-        expect(find.text('Resolving'), findsOneWidget);
-        expect(find.text('Analyzing'), findsNothing);
-
-        // Even if an upstream 0-byte Downloading event arrives, UI stays Connecting & Pause disabled.
-        fakeRepo.progressController.add(
-          DownloadProgressEvent(
-            jobId: 'fake-job-1',
-            phase: DownloadPhase.downloading,
-            downloadedBytes: BigInt.zero,
-            isTotalEstimated: false,
-          ),
-        );
-        await tester.pump(const Duration(milliseconds: 250));
-        expect(find.text('Connecting'), findsOneWidget);
-        expect(find.text('Downloading'), findsNothing);
-        expect(
-          tester
-              .widget<FilledButton>(
-                find.byKey(const Key('pause_download_button')),
-              )
-              .onPressed,
-          isNull,
-        );
-
-        // Once real media bytes arrive, UI transitions to Downloading and Pause becomes enabled.
-        fakeRepo.progressController.add(
-          DownloadProgressEvent(
-            jobId: 'fake-job-1',
-            phase: DownloadPhase.downloading,
-            downloadedBytes: BigInt.from(131072),
-            totalBytes: BigInt.from(1514829),
-            isTotalEstimated: false,
-            speedBytesPerSec: 262144.0,
-            etaSeconds: BigInt.from(5),
-          ),
-        );
-        await tester.pumpAndSettle();
-        expect(find.text('Downloading'), findsOneWidget);
-        expect(
-          tester
-              .widget<FilledButton>(
-                find.byKey(const Key('pause_download_button')),
-              )
-              .onPressed,
-          isNotNull,
-        );
-      },
-    );
-
-    testWidgets(
-      'displays informative Instagram analysis status and supports Cancel while analyzing',
-      (WidgetTester tester) async {
-        final completer = Completer<UrlInspectionResult>();
-        fakeRepo.inspectCompleter = completer;
-
-        await tester.pumpWidget(
-          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
-        );
-        await tester.pump();
-
-        await tester.enterText(
-          find.byKey(const Key('url_input_field')),
-          'https://www.instagram.com/reel/DTVTvUDj-b1/',
-        );
-        await tester.tap(find.byKey(const Key('analyze_url_button')));
-        await tester.pump(const Duration(milliseconds: 100));
-
-        expect(find.byKey(const Key('analysis_status_text')), findsOneWidget);
-        expect(
-          find.text(
-            'Connecting to Instagram and checking available formats...',
-          ),
-          findsOneWidget,
-        );
-        expect(find.byKey(const Key('cancel_analysis_button')), findsOneWidget);
-
-        await tester.tap(find.byKey(const Key('cancel_analysis_button')));
-        await tester.pumpAndSettle();
-
-        expect(find.byKey(const Key('analysis_status_text')), findsNothing);
-        expect(find.byKey(const Key('cancel_analysis_button')), findsNothing);
-
-        // Late-arriving metadata after cancellation must remain ignored.
-        fakeRepo.returnProgressiveInstagramReel = true;
-        fakeRepo.inspectCompleter = null;
-        final lateMedia = await fakeRepo.inspectMedia(
-          'https://www.instagram.com/reel/DTVTvUDj-b1/',
-        );
-        completer.complete(
-          UrlInspectionResult(
-            kind: InspectionTargetKind.singleVideo,
-            video: lateMedia,
-          ),
-        );
-        await tester.pumpAndSettle();
-        expect(find.text('Video by rahulmfg'), findsNothing);
-      },
-    );
-
-    testWidgets(
-      'displays Android public path cleanly without /storage/emulated/0 prefix',
-      (WidgetTester tester) async {
-        await tester.pumpWidget(
-          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
-        );
-        await tester.pump();
-
-        await tester.enterText(
-          find.byKey(const Key('url_input_field')),
-          'https://www.youtube.com/shorts/aqz-KE-bpKQ',
-        );
-        await tester.tap(find.byKey(const Key('analyze_url_button')));
-        await tester.pumpAndSettle();
-
-        final startButton = find.byKey(const Key('start_download_button'));
-        await tester.ensureVisible(startButton);
-        await tester.tap(startButton);
-        await tester.pump();
-
-        fakeRepo.progressController.add(
-          DownloadProgressEvent(
-            jobId: 'fake-job-1',
-            phase: DownloadPhase.completed,
-            downloadedBytes: BigInt.from(1024),
-            totalBytes: BigInt.from(1024),
-            isTotalEstimated: false,
-            outputPath: '/storage/emulated/0/HyperDownload/Videos/demo.mp4',
-            message: 'Saved to HyperDownload/Videos.',
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        final pathFinder = find.byKey(const Key('output_path_text'));
-        await tester.ensureVisible(pathFinder);
-        final pathText = tester.widget<Text>(pathFinder);
-        expect(pathText.data, 'HyperDownload/Videos/demo.mp4');
-      },
-    );
-
-    testWidgets(
-      'warm-start shared Instagram Reel replaces previous YouTube URL and shows Instagram analysis status',
-      (WidgetTester tester) async {
-        final completer = Completer<UrlInspectionResult>();
-        final sharedController = StreamController<String>.broadcast();
-        addTearDown(sharedController.close);
-
-        await tester.pumpWidget(
-          HyperDownloadApp(
-            repository: fakeRepo,
-            fileLauncher: fakeLauncher,
-            sharedUrls: sharedController.stream,
-          ),
-        );
-        await tester.pump();
-
-        await tester.enterText(
-          find.byKey(const Key('url_input_field')),
-          'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
-        );
-        await tester.pump();
-
-        fakeRepo.inspectCompleter = completer;
-        sharedController.add('https://www.instagram.com/reel/DTVTvUDj-b1/');
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 50));
-
-        final field = tester.widget<TextField>(
-          find.byKey(const Key('url_input_field')),
-        );
-        expect(
-          field.controller?.text,
-          'https://www.instagram.com/reel/DTVTvUDj-b1/',
-        );
-        expect(
-          find.text(
-            'Connecting to Instagram and checking available formats...',
-          ),
-          findsOneWidget,
-        );
-
-        fakeRepo.returnProgressiveInstagramReel = true;
-        fakeRepo.inspectCompleter = null;
-        final resolved = await fakeRepo.inspectMedia(
-          'https://www.instagram.com/reel/DTVTvUDj-b1/',
-        );
-        completer.complete(
-          UrlInspectionResult(
-            kind: InspectionTargetKind.singleVideo,
-            video: resolved,
-          ),
-        );
-        await tester.pumpAndSettle();
-        expect(find.text('Instagram'), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      'playlist size card shows animated spinner and indeterminate bar at 0 inspected, updates to determinate progress, and cancels immediately when starting download',
-      (WidgetTester tester) async {
-        fakeRepo.initialBestPlaylistSizeEstimate = PlaylistSizeEstimate(
-          estimationId: 'est-zero',
-          playlistId: 'PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
-          mediaMode: PlaylistMediaMode.videoWithSound,
-          qualityCap: PlaylistQualityCap.bestAvailable,
-          status: PlaylistSizeStatus.calculating,
-          knownTotalBytes: BigInt.zero,
-          totalEntriesCount: 3,
-          unavailableCount: 1,
-          eligibleCount: 2,
-          inspectedCount: 0,
-          exactCount: 0,
-          estimatedCount: 0,
-          unknownCount: 0,
-          failedCount: 0,
-          displaySummary: 'Calculating playlist size...',
-          statusMessage: 'Calculating sizes: 0 / 2 videos',
-          itemSizes: const [],
-        );
-
-        await tester.pumpWidget(
-          HyperDownloadApp(repository: fakeRepo, fileLauncher: fakeLauncher),
-        );
-        await tester.pump();
-
-        await tester.enterText(
-          find.byKey(const Key('url_input_field')),
-          'https://www.youtube.com/playlist?list=PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
-        );
-        await tester.tap(find.byKey(const Key('analyze_url_button')));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 350));
-
-        expect(find.byKey(const Key('playlist_size_spinner')), findsOneWidget);
-        final initialBar = tester.widget<LinearProgressIndicator>(
-          find.byKey(const Key('playlist_size_progress_bar')),
-        );
-        expect(initialBar.value, isNull);
-
-        fakeRepo.playlistSizeController.add(
-          PlaylistSizeEstimate(
-            estimationId: 'est-zero',
-            playlistId: 'PLa1F2ddGya_8Geu0rJ4y4dVCc9jZxS2IB',
-            mediaMode: PlaylistMediaMode.videoWithSound,
-            qualityCap: PlaylistQualityCap.bestAvailable,
-            status: PlaylistSizeStatus.calculating,
-            knownTotalBytes: BigInt.from(5242880),
-            totalEntriesCount: 3,
-            unavailableCount: 1,
-            eligibleCount: 2,
-            inspectedCount: 1,
-            exactCount: 1,
-            estimatedCount: 0,
-            unknownCount: 0,
-            failedCount: 0,
-            displaySummary: 'Calculating playlist size...',
-            statusMessage: 'Calculating sizes: 1 / 2 videos',
-            itemSizes: const [],
-          ),
-        );
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 350));
-
-        expect(find.byKey(const Key('playlist_size_spinner')), findsOneWidget);
-        final progressBar = tester.widget<LinearProgressIndicator>(
-          find.byKey(const Key('playlist_size_progress_bar')),
-        );
-        expect(progressBar.value, closeTo(0.5, 0.001));
-
-        await tester.ensureVisible(
-          find.byKey(const Key('start_playlist_button')),
-        );
-        await tester.tap(find.byKey(const Key('start_playlist_button')));
-        await tester.pumpAndSettle();
-
-        expect(fakeRepo.lastCanceledSizeEstimationId, 'est-zero');
-        expect(find.byKey(const Key('playlist_size_spinner')), findsNothing);
-        expect(
-          find.byKey(const Key('playlist_size_progress_bar')),
-          findsNothing,
-        );
-        expect(find.text('At least 5.00 MB · canceled'), findsOneWidget);
-        expect(find.byKey(const Key('recalculate_size_button')), findsNothing);
-      },
-    );
+    expect(find.text('100%'), findsOneWidget);
+    expect(find.text('Download Again'), findsOneWidget);
   });
+
+  testWidgets('narrow 460px Arabic RTL layout and error banner render cleanly', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(460, 840));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final inspectRepo = _TestInspectionRepo();
+    final sessionRepo = _TestSessionRepo();
+    final singleRepo = _TestSingleDownloadRepo();
+    final playlistRepo = _TestPlaylistDownloadRepo();
+    final launcher = _TestFileLauncher();
+    addTearDown(() async {
+      await singleRepo.controller.close();
+      await playlistRepo.progressController.close();
+      await playlistRepo.sizeController.close();
+    });
+
+    inspectRepo.onInspectUrl = (url) async {
+      if (url.contains('bad')) {
+        throw const InvalidUrlException('Invalid media link provided.');
+      }
+      return UrlInspectionResult(
+        kind: InspectionTargetKind.singleVideo,
+        video: _videoInspection(
+          id: 'rtl1',
+          title: 'شرح معمارية التطبيقات النظيفة بالكامل',
+          silent: true,
+        ),
+      );
+    };
+
+    await tester.pumpWidget(
+      HyperDownloadApp(
+        inspectionRepository: inspectRepo,
+        playlistSessionRepository: sessionRepo,
+        singleDownloadRepository: singleRepo,
+        playlistDownloadRepository: playlistRepo,
+        fileLauncher: launcher,
+        getInitialSharedUrl: () async => null,
+        sharedUrls: const Stream.empty(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('url_input_field')),
+      'https://bad.example.com/x',
+    );
+    await tester.tap(find.byKey(const Key('analyze_url_button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Invalid media link provided.'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('url_input_field')),
+      'https://www.youtube.com/watch?v=rtl1',
+    );
+    await tester.tap(find.byKey(const Key('analyze_url_button')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('شرح معمارية التطبيقات النظيفة بالكامل'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Instagram loading state can cancel and warm-start shared URL works', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 860));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final inspectRepo = _TestInspectionRepo();
+    final sessionRepo = _TestSessionRepo();
+    final singleRepo = _TestSingleDownloadRepo();
+    final playlistRepo = _TestPlaylistDownloadRepo();
+    final launcher = _TestFileLauncher();
+    final sharedController = StreamController<String>.broadcast();
+    final completer = Completer<UrlInspectionResult>();
+
+    addTearDown(() async {
+      await sharedController.close();
+      await singleRepo.controller.close();
+      await playlistRepo.progressController.close();
+      await playlistRepo.sizeController.close();
+    });
+
+    inspectRepo.onInspectUrl = (url) {
+      if (url.contains('instagram.com')) return completer.future;
+      return Future.value(
+        UrlInspectionResult(
+          kind: InspectionTargetKind.singleVideo,
+          video: _videoInspection(id: 'shared1', title: 'Shared Video'),
+        ),
+      );
+    };
+
+    await tester.pumpWidget(
+      HyperDownloadApp(
+        inspectionRepository: inspectRepo,
+        playlistSessionRepository: sessionRepo,
+        singleDownloadRepository: singleRepo,
+        playlistDownloadRepository: playlistRepo,
+        fileLauncher: launcher,
+        getInitialSharedUrl: () async => null,
+        sharedUrls: sharedController.stream,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('url_input_field')),
+      'https://www.instagram.com/reel/C8x123/',
+    );
+    await tester.tap(find.byKey(const Key('analyze_url_button')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('analysis_status_text')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('cancel_analysis_button')));
+    await tester.pump();
+    completer.completeError(const ProcessExecutionException('canceled'));
+    await tester.pumpAndSettle();
+
+    sharedController.add('https://www.youtube.com/watch?v=shared1');
+    await tester.pumpAndSettle();
+    expect(find.text('Shared Video'), findsOneWidget);
+  });
+
+  testWidgets('playlist inspection triggers size estimation and batch download', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1100, 920));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final inspectRepo = _TestInspectionRepo();
+    final sessionRepo = _TestSessionRepo();
+    final singleRepo = _TestSingleDownloadRepo();
+    final playlistRepo = _TestPlaylistDownloadRepo();
+    final launcher = _TestFileLauncher();
+    addTearDown(() async {
+      await singleRepo.controller.close();
+      await playlistRepo.progressController.close();
+      await playlistRepo.sizeController.close();
+    });
+
+    const playlist = PlaylistInspection(
+      id: 'PL_UI',
+      title: 'Architecture Series',
+      webpageUrl: 'https://www.youtube.com/playlist?list=PL_UI',
+      providerName: 'YouTube',
+      totalItemCount: 1,
+      entries: [
+        PlaylistEntrySummary(
+          orderIndex: 1,
+          videoId: 'v1',
+          title: 'Part 1 - Domain',
+          url: 'https://www.youtube.com/watch?v=v1',
+          availability: PlaylistEntryAvailability.available,
+        ),
+      ],
+    );
+
+    playlistRepo.estimateToReturn = const PlaylistSizeEstimate(
+      estimationId: 'est-ui',
+      playlistId: 'PL_UI',
+      mediaMode: PlaylistMediaMode.videoWithSound,
+      qualityCap: PlaylistQualityCap.bestAvailable,
+      status: PlaylistSizeStatus.exact,
+      knownTotalBytes: 10485760,
+      totalEntriesCount: 1,
+      unavailableCount: 0,
+      eligibleCount: 1,
+      inspectedCount: 1,
+      exactCount: 1,
+      estimatedCount: 0,
+      unknownCount: 0,
+      failedCount: 0,
+      displaySummary: '10.0 MB exact across 1 item',
+      itemSizes: [],
+    );
+
+    playlistRepo.snapshotToReturn = const PlaylistSessionSnapshot(
+      sessionId: 'sess-ui',
+      playlistId: 'PL_UI',
+      playlistTitle: 'Architecture Series',
+      playlistUrl: 'https://www.youtube.com/playlist?list=PL_UI',
+      outputDirectory: r'C:\Downloads\Architecture Series',
+      mediaMode: PlaylistMediaMode.videoWithSound,
+      qualityCap: PlaylistQualityCap.bestAvailable,
+      isRunning: true,
+      isPaused: false,
+      completedCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
+      totalCount: 1,
+      items: [
+        PlaylistItemState(
+          orderIndex: 1,
+          videoId: 'v1',
+          title: 'Part 1 - Domain',
+          url: 'https://www.youtube.com/watch?v=v1',
+          status: PlaylistItemStatus.pending,
+          downloadedBytes: 0,
+          isTotalEstimated: false,
+        ),
+      ],
+    );
+
+    inspectRepo.onInspectUrl = (_) async => const UrlInspectionResult(
+      kind: InspectionTargetKind.playlist,
+      playlist: playlist,
+    );
+
+    await tester.pumpWidget(
+      HyperDownloadApp(
+        inspectionRepository: inspectRepo,
+        playlistSessionRepository: sessionRepo,
+        singleDownloadRepository: singleRepo,
+        playlistDownloadRepository: playlistRepo,
+        fileLauncher: launcher,
+        getInitialSharedUrl: () async => null,
+        sharedUrls: const Stream.empty(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('url_input_field')),
+      'https://www.youtube.com/playlist?list=PL_UI',
+    );
+    await tester.tap(find.byKey(const Key('analyze_url_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Architecture Series'), findsOneWidget);
+    expect(find.byKey(const Key('playlist_size_summary_card')), findsOneWidget);
+    expect(find.text('10.0 MB exact across 1 item'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('start_playlist_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('playlist_overall_progress')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('pause_playlist_button')));
+    await tester.pump();
+    expect(playlistRepo.pausedSessionId, 'sess-ui');
+  });
+
+  if (Platform.isWindows) {
+    test('Win32 PIDL helper handles existing and missing paths cleanly', () async {
+      final tempDir = await Directory.systemTemp.createTemp('hyperdl_pidl_');
+      addTearDown(() => tempDir.delete(recursive: true));
+      final existing = File('${tempDir.path}\\sample.txt');
+      await existing.writeAsString('ok');
+
+      expect(canCreateShellItemIdListForFile(existing.path), isTrue);
+      expect(
+        canCreateShellItemIdListForFile('${tempDir.path}\\missing.txt'),
+        isFalse,
+      );
+    });
+  }
 }

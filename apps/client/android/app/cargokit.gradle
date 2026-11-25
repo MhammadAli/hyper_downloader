@@ -1,6 +1,0 @@
-apply from: "../../cargokit/gradle/plugin.gradle"
-
-cargokit {
-    manifestDir = "../../../../rust/crates/engine_ffi"
-    libname = "engine_ffi"
-}

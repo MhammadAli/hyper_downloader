@@ -35,9 +35,6 @@ class MainActivity : FlutterActivity() {
     @Volatile
     private var playlistSink: EventChannel.EventSink? = null
 
-    @Volatile
-    private var sizeEstimateSink: EventChannel.EventSink? = null
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ensureTransferPermissions()
@@ -112,21 +109,6 @@ class MainActivity : FlutterActivity() {
                 AndroidDownloadEngine.setPlaylistEventEmitter(null)
             },
         )
-
-        registerJsonEventChannel(
-            messenger = messenger,
-            channelName = PLAYLIST_SIZE_ESTIMATE_CHANNEL,
-            attach = { sink ->
-                sizeEstimateSink = sink
-                AndroidDownloadEngine.setSizeEstimateEventEmitter { json ->
-                    mainHandler.post { sizeEstimateSink?.success(json) }
-                }
-            },
-            detach = {
-                sizeEstimateSink = null
-                AndroidDownloadEngine.setSizeEstimateEventEmitter(null)
-            },
-        )
     }
 
     private fun handleEngineMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -138,27 +120,18 @@ class MainActivity : FlutterActivity() {
                 AndroidDownloadEngine.runDiagnostics(applicationContext)
             }
 
-            "inspectUrl" -> {
+            "extractRawInfo" -> {
                 val url = requireArg(call, result, "url") ?: return
-                dispatchAsync(result, "INSPECT_URL_FAILED") {
-                    unwrapEnvelopeResult(AndroidDownloadEngine.inspectUrl(applicationContext, url))
-                }
-            }
-
-            "inspectMedia" -> {
-                val url = requireArg(call, result, "url") ?: return
-                dispatchAsync(result, "INSPECT_FAILED") {
+                val isPlaylist = call.argument<Boolean>("isPlaylist") ?: false
+                val isInstagram = call.argument<Boolean>("isInstagram") ?: false
+                dispatchAsync(result, "EXTRACT_RAW_INFO_FAILED") {
                     unwrapEnvelopeResult(
-                        AndroidDownloadEngine.inspectMedia(applicationContext, url),
-                    )
-                }
-            }
-
-            "inspectPlaylist" -> {
-                val url = requireArg(call, result, "url") ?: return
-                dispatchAsync(result, "INSPECT_PLAYLIST_FAILED") {
-                    unwrapEnvelopeResult(
-                        AndroidDownloadEngine.inspectPlaylist(applicationContext, url),
+                        AndroidDownloadEngine.extractRawInfo(
+                            applicationContext,
+                            url,
+                            isPlaylist,
+                            isInstagram,
+                        ),
                     )
                 }
             }
@@ -184,24 +157,6 @@ class MainActivity : FlutterActivity() {
                 ensureTransferPermissions(promptAllFilesIfMissing = true)
                 dispatchAsync(result, "RESUME_DOWNLOAD_FAILED") {
                     AndroidDownloadEngine.resumeDownload(applicationContext, jobId)
-                }
-            }
-
-            "estimatePlaylistSize" -> {
-                val requestJson = requireArg(call, result, "requestJson") ?: return
-                dispatchAsync(result, "ESTIMATE_SIZE_FAILED") {
-                    AndroidDownloadEngine.estimatePlaylistSize(applicationContext, requestJson)
-                }
-            }
-
-            "cancelPlaylistSizeEstimation" -> {
-                val estimationId = requireArg(call, result, "estimationId") ?: return
-                dispatchAsync(result, "CANCEL_ESTIMATE_FAILED") {
-                    AndroidDownloadEngine.cancelPlaylistSizeEstimation(
-                        applicationContext,
-                        estimationId,
-                    )
-                    null
                 }
             }
 
@@ -411,22 +366,24 @@ class MainActivity : FlutterActivity() {
 
                     Log.i(PROOF_TAG, "Inspecting authorized test video: $testUrl")
                     val t0 = System.currentTimeMillis()
-                    val inspectJson = AndroidDownloadEngine.inspectMedia(applicationContext, testUrl)
+                    val inspectJson = AndroidDownloadEngine.extractRawInfo(
+                        applicationContext,
+                        testUrl,
+                        isPlaylist = false,
+                        isInstagram = false,
+                    )
                     val elapsedMs = System.currentTimeMillis() - t0
                     val envelope = JSONObject(inspectJson)
                     if (envelope.has("ok")) {
-                        val ok = envelope.getJSONObject("ok")
+                        val rawInfo = JSONObject(envelope.getString("ok"))
                         val summary = JSONObject().apply {
-                            put("id", ok.optString("id"))
-                            put("title", ok.optString("title"))
-                            put("uploader", ok.opt("uploader"))
-                            put("provider_name", ok.optString("provider_name"))
-                            put("duration_seconds", ok.opt("duration_seconds"))
+                            put("id", rawInfo.optString("id"))
+                            put("title", rawInfo.optString("title"))
+                            put("uploader", rawInfo.opt("uploader"))
+                            put("extractor", rawInfo.optString("extractor_key"))
+                            put("duration_seconds", rawInfo.opt("duration"))
                             put("inspect_elapsed_ms", elapsedMs)
-                            put("formats_count", ok.optJSONArray("formats")?.length() ?: 0)
-                            put("video_options_count", ok.optJSONArray("video_options")?.length() ?: 0)
-                            put("audio_options_count", ok.optJSONArray("audio_options")?.length() ?: 0)
-                            put("original_audio", ok.opt("original_audio"))
+                            put("formats_count", rawInfo.optJSONArray("formats")?.length() ?: 0)
                         }
                         Log.i(PROOF_TAG, "INSPECT_SUMMARY_JSON=$summary")
                     } else {
@@ -449,8 +406,6 @@ class MainActivity : FlutterActivity() {
             private const val PLATFORM_INTENT_CHANNEL = "com.hyperdownload/platform_intents"
             private const val DOWNLOAD_PROGRESS_CHANNEL = "com.hyperdownload/download_progress"
             private const val PLAYLIST_PROGRESS_CHANNEL = "com.hyperdownload/playlist_progress"
-            private const val PLAYLIST_SIZE_ESTIMATE_CHANNEL =
-                "com.hyperdownload/playlist_size_estimate"
             private const val REQUEST_TRANSFER_PERMS = 9101
             private val URL_REGEX = Regex("https?://[^\\s<>\"']+")
         }
