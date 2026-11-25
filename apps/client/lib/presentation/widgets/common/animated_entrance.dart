@@ -25,3 +25,36 @@ class AnimatedEntrance extends StatelessWidget {
     );
   }
 }
+
+/// Smoothly expands/collapses an optional section with entrance animation.
+class AnimatedCollapsibleSection extends StatelessWidget {
+  final bool visible;
+  final Widget child;
+  final Key? entranceKey;
+  final double topSpacing;
+  final Duration duration;
+
+  const AnimatedCollapsibleSection({
+    super.key,
+    required this.visible,
+    required this.child,
+    this.entranceKey,
+    this.topSpacing = 16,
+    this.duration = const Duration(milliseconds: 260),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSize(
+      duration: duration,
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: visible
+          ? Padding(
+              padding: EdgeInsets.only(top: topSpacing),
+              child: AnimatedEntrance(key: entranceKey, child: child),
+            )
+          : const SizedBox.shrink(),
+    );
+  }
+}

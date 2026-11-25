@@ -4,6 +4,8 @@ import 'package:hyper_download_client/core/utils/formatters.dart';
 import 'package:hyper_download_client/domain/entities/playlist_entities.dart';
 import 'package:hyper_download_client/presentation/cubits/playlist_download_cubit.dart';
 import 'package:hyper_download_client/presentation/cubits/playlist_download_state.dart';
+import 'package:hyper_download_client/presentation/widgets/common/animated_entrance.dart';
+import 'package:hyper_download_client/presentation/widgets/common/section_card.dart';
 import 'package:hyper_download_client/presentation/widgets/common/status_badges.dart';
 import 'package:hyper_download_client/presentation/widgets/playlist/playlist_size_summary_card.dart';
 
@@ -26,11 +28,9 @@ class PlaylistControlsCard extends StatelessWidget {
     final activeItem = state.activePlaylistItem;
     final controlsLocked = state.isPlaylistRunning;
 
-    return Card(
-      key: const Key('playlist_controls_card'),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+    return SectionCard(
+      cardKey: const Key('playlist_controls_card'),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Wrap(
@@ -184,38 +184,30 @@ class PlaylistControlsCard extends StatelessWidget {
                   ),
               ],
             ),
-            AnimatedSize(
+            AnimatedCollapsibleSection(
+              visible: session != null,
               duration: const Duration(milliseconds: 240),
-              curve: Curves.easeOutCubic,
-              alignment: Alignment.topCenter,
               child: session != null
-                  ? Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: _OverallBatchProgressPanel(
-                        session: session,
-                        fallbackTotal: playlist.totalItemCount,
-                        statusMessage: state.playlistStatusMessage,
-                      ),
+                  ? _OverallBatchProgressPanel(
+                      session: session,
+                      fallbackTotal: playlist.totalItemCount,
+                      statusMessage: state.playlistStatusMessage,
                     )
                   : const SizedBox.shrink(),
             ),
-            AnimatedSize(
+            AnimatedCollapsibleSection(
+              visible: activeItem != null,
+              topSpacing: 12,
               duration: const Duration(milliseconds: 240),
-              curve: Curves.easeOutCubic,
-              alignment: Alignment.topCenter,
               child: activeItem != null
-                  ? Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: _ActivePlaylistItemPanel(
-                        item: activeItem,
-                        speedBytesPerSec: state.activePlaylistSpeedBytesPerSec,
-                        etaSeconds: state.activePlaylistEtaSeconds,
-                      ),
+                  ? _ActivePlaylistItemPanel(
+                      item: activeItem,
+                      speedBytesPerSec: state.activePlaylistSpeedBytesPerSec,
+                      etaSeconds: state.activePlaylistEtaSeconds,
                     )
                   : const SizedBox.shrink(),
             ),
           ],
-        ),
       ),
     );
   }

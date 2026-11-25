@@ -4,6 +4,7 @@ import 'package:hyper_download_client/domain/entities/download_entities.dart';
 import 'package:hyper_download_client/domain/entities/media_entities.dart';
 import 'package:hyper_download_client/presentation/cubits/single_download_cubit.dart';
 import 'package:hyper_download_client/presentation/cubits/single_download_state.dart';
+import 'package:hyper_download_client/presentation/widgets/common/section_card.dart';
 
 class QualitySelectionCard extends StatelessWidget {
   final SingleDownloadState state;
@@ -16,11 +17,9 @@ class QualitySelectionCard extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
 
-    return Card(
-      key: const Key('quality_selection_card'),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+    return SectionCard(
+      cardKey: const Key('quality_selection_card'),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Wrap(
@@ -128,7 +127,6 @@ class QualitySelectionCard extends StatelessWidget {
                     ),
             ),
           ],
-        ),
       ),
     );
   }

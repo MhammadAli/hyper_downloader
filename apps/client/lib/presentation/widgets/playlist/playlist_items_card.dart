@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hyper_download_client/core/utils/formatters.dart';
 import 'package:hyper_download_client/domain/entities/playlist_entities.dart';
+import 'package:hyper_download_client/presentation/widgets/common/section_card.dart';
 import 'package:hyper_download_client/presentation/widgets/common/status_badges.dart';
 
 class PlaylistItemsCard extends StatelessWidget {
@@ -26,11 +27,9 @@ class PlaylistItemsCard extends StatelessWidget {
         info.orderIndex: info,
     };
 
-    return Card(
-      key: const Key('playlist_items_card'),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+    return SectionCard(
+      cardKey: const Key('playlist_items_card'),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
@@ -66,7 +65,6 @@ class PlaylistItemsCard extends StatelessWidget {
                 ),
               ),
           ],
-        ),
       ),
     );
   }

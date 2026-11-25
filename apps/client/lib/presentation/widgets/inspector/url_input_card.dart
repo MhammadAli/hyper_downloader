@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:hyper_download_client/presentation/widgets/common/section_card.dart';
 
 class UrlInputCard extends StatelessWidget {
   final TextEditingController controller;
@@ -31,11 +32,9 @@ class UrlInputCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
+    return SectionCard(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
             final textField = TextField(
               key: const Key('url_input_field'),
               controller: controller,
@@ -146,7 +145,6 @@ class UrlInputCard extends StatelessWidget {
             );
           },
         ),
-      ),
     );
   }
 }

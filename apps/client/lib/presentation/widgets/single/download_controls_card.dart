@@ -5,6 +5,7 @@ import 'package:hyper_download_client/domain/entities/download_entities.dart';
 import 'package:hyper_download_client/presentation/cubits/single_download_cubit.dart';
 import 'package:hyper_download_client/presentation/cubits/single_download_state.dart';
 import 'package:hyper_download_client/presentation/widgets/common/animated_entrance.dart';
+import 'package:hyper_download_client/presentation/widgets/common/section_card.dart';
 
 class DownloadControlsCard extends StatelessWidget {
   final SingleDownloadState state;
@@ -58,11 +59,9 @@ class DownloadControlsCard extends StatelessWidget {
         progress?.message ??
         (isPreparingInitial ? 'Preparing download...' : null);
 
-    return Card(
-      key: const Key('download_controls_card'),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+    return SectionCard(
+      cardKey: const Key('download_controls_card'),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -197,26 +196,19 @@ class DownloadControlsCard extends StatelessWidget {
                   ),
                 ),
               ],
-              AnimatedSize(
+              AnimatedCollapsibleSection(
+                visible: isCompleted,
+                topSpacing: 14,
                 duration: const Duration(milliseconds: 240),
-                curve: Curves.easeOutCubic,
-                child: isCompleted
-                    ? Padding(
-                        padding: const EdgeInsets.only(top: 14),
-                        child: AnimatedEntrance(
-                          key: ValueKey('done_$outputPath'),
-                          child: _CompletedFilePanel(
-                            outputPath: outputPath,
-                            onOpenFile: onOpenFile,
-                            onRevealInFolder: onRevealInFolder,
-                          ),
-                        ),
-                      )
-                    : const SizedBox.shrink(),
+                entranceKey: ValueKey('done_$outputPath'),
+                child: _CompletedFilePanel(
+                  outputPath: outputPath ?? '',
+                  onOpenFile: onOpenFile,
+                  onRevealInFolder: onRevealInFolder,
+                ),
               ),
             ],
           ],
-        ),
       ),
     );
   }

@@ -3,7 +3,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hyper_download_client/core/di/injection_container.dart';
 import 'package:hyper_download_client/core/error/app_exception.dart';
+import 'package:hyper_download_client/core/platform/platform_intent_service.dart';
 import 'package:hyper_download_client/data/datasources/windows/windows_desktop_file_launcher.dart';
 import 'package:hyper_download_client/domain/entities/download_entities.dart';
 import 'package:hyper_download_client/domain/entities/media_entities.dart';
@@ -168,6 +170,32 @@ class _TestFileLauncher implements FileLauncherRepository {
   Future<bool> shareFile(String path) async => true;
 }
 
+Future<void> _pumpApp(
+  WidgetTester tester, {
+  required MediaInspectionRepository inspectRepo,
+  required PlaylistSessionRepository sessionRepo,
+  required SingleDownloadRepository singleRepo,
+  required PlaylistDownloadRepository playlistRepo,
+  required FileLauncherRepository launcher,
+  Future<String?> Function()? getInitialSharedUrl,
+  Stream<String>? sharedUrls,
+}) async {
+  await initDependencies(
+    inspectionRepositoryOverride: inspectRepo,
+    playlistSessionRepositoryOverride: sessionRepo,
+    singleDownloadRepositoryOverride: singleRepo,
+    playlistDownloadRepositoryOverride: playlistRepo,
+    fileLauncherRepositoryOverride: launcher,
+    platformIntentServiceOverride: PlatformIntentService(
+      getInitialSharedUrl: getInitialSharedUrl ?? () async => null,
+      sharedUrls: sharedUrls ?? const Stream.empty(),
+    ),
+  );
+  addTearDown(() => sl.reset());
+  await tester.pumpWidget(const HyperDownloadApp());
+  await tester.pumpAndSettle();
+}
+
 MediaInspection _videoInspection({
   String id = 'vid1',
   String title = 'Flutter Clean Architecture Demo',
@@ -236,18 +264,14 @@ void main() {
       video: _videoInspection(),
     );
 
-    await tester.pumpWidget(
-      HyperDownloadApp(
-        inspectionRepository: inspectRepo,
-        playlistSessionRepository: sessionRepo,
-        singleDownloadRepository: singleRepo,
-        playlistDownloadRepository: playlistRepo,
-        fileLauncher: launcher,
-        getInitialSharedUrl: () async => null,
-        sharedUrls: const Stream.empty(),
-      ),
+    await _pumpApp(
+      tester,
+      inspectRepo: inspectRepo,
+      sessionRepo: sessionRepo,
+      singleRepo: singleRepo,
+      playlistRepo: playlistRepo,
+      launcher: launcher,
     );
-    await tester.pumpAndSettle();
 
     await tester.enterText(
       find.byKey(const Key('url_input_field')),
@@ -335,18 +359,14 @@ void main() {
       );
     };
 
-    await tester.pumpWidget(
-      HyperDownloadApp(
-        inspectionRepository: inspectRepo,
-        playlistSessionRepository: sessionRepo,
-        singleDownloadRepository: singleRepo,
-        playlistDownloadRepository: playlistRepo,
-        fileLauncher: launcher,
-        getInitialSharedUrl: () async => null,
-        sharedUrls: const Stream.empty(),
-      ),
+    await _pumpApp(
+      tester,
+      inspectRepo: inspectRepo,
+      sessionRepo: sessionRepo,
+      singleRepo: singleRepo,
+      playlistRepo: playlistRepo,
+      launcher: launcher,
     );
-    await tester.pumpAndSettle();
 
     await tester.enterText(
       find.byKey(const Key('url_input_field')),
@@ -370,67 +390,65 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Instagram loading state can cancel and warm-start shared URL works', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1000, 860));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+  testWidgets(
+    'Instagram loading state can cancel and warm-start shared URL works',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 860));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
 
-    final inspectRepo = _TestInspectionRepo();
-    final sessionRepo = _TestSessionRepo();
-    final singleRepo = _TestSingleDownloadRepo();
-    final playlistRepo = _TestPlaylistDownloadRepo();
-    final launcher = _TestFileLauncher();
-    final sharedController = StreamController<String>.broadcast();
-    final completer = Completer<UrlInspectionResult>();
+      final inspectRepo = _TestInspectionRepo();
+      final sessionRepo = _TestSessionRepo();
+      final singleRepo = _TestSingleDownloadRepo();
+      final playlistRepo = _TestPlaylistDownloadRepo();
+      final launcher = _TestFileLauncher();
+      final sharedController = StreamController<String>.broadcast();
+      final completer = Completer<UrlInspectionResult>();
 
-    addTearDown(() async {
-      await sharedController.close();
-      await singleRepo.controller.close();
-      await playlistRepo.progressController.close();
-      await playlistRepo.sizeController.close();
-    });
+      addTearDown(() async {
+        await sharedController.close();
+        await singleRepo.controller.close();
+        await playlistRepo.progressController.close();
+        await playlistRepo.sizeController.close();
+      });
 
-    inspectRepo.onInspectUrl = (url) {
-      if (url.contains('instagram.com')) return completer.future;
-      return Future.value(
-        UrlInspectionResult(
-          kind: InspectionTargetKind.singleVideo,
-          video: _videoInspection(id: 'shared1', title: 'Shared Video'),
-        ),
-      );
-    };
+      inspectRepo.onInspectUrl = (url) {
+        if (url.contains('instagram.com')) return completer.future;
+        return Future.value(
+          UrlInspectionResult(
+            kind: InspectionTargetKind.singleVideo,
+            video: _videoInspection(id: 'shared1', title: 'Shared Video'),
+          ),
+        );
+      };
 
-    await tester.pumpWidget(
-      HyperDownloadApp(
-        inspectionRepository: inspectRepo,
-        playlistSessionRepository: sessionRepo,
-        singleDownloadRepository: singleRepo,
-        playlistDownloadRepository: playlistRepo,
-        fileLauncher: launcher,
-        getInitialSharedUrl: () async => null,
+      await _pumpApp(
+        tester,
+        inspectRepo: inspectRepo,
+        sessionRepo: sessionRepo,
+        singleRepo: singleRepo,
+        playlistRepo: playlistRepo,
+        launcher: launcher,
         sharedUrls: sharedController.stream,
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
 
-    await tester.enterText(
-      find.byKey(const Key('url_input_field')),
-      'https://www.instagram.com/reel/C8x123/',
-    );
-    await tester.tap(find.byKey(const Key('analyze_url_button')));
-    await tester.pump();
+      await tester.enterText(
+        find.byKey(const Key('url_input_field')),
+        'https://www.instagram.com/reel/C8x123/',
+      );
+      await tester.tap(find.byKey(const Key('analyze_url_button')));
+      await tester.pump();
 
-    expect(find.byKey(const Key('analysis_status_text')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('cancel_analysis_button')));
-    await tester.pump();
-    completer.completeError(const ProcessExecutionException('canceled'));
-    await tester.pumpAndSettle();
+      expect(find.byKey(const Key('analysis_status_text')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('cancel_analysis_button')));
+      await tester.pump();
+      completer.completeError(const ProcessExecutionException('canceled'));
+      await tester.pumpAndSettle();
 
-    sharedController.add('https://www.youtube.com/watch?v=shared1');
-    await tester.pumpAndSettle();
-    expect(find.text('Shared Video'), findsOneWidget);
-  });
+      sharedController.add('https://www.youtube.com/watch?v=shared1');
+      await tester.pumpAndSettle();
+      expect(find.text('Shared Video'), findsOneWidget);
+    },
+  );
 
   testWidgets('playlist inspection triggers size estimation and batch download', (
     tester,
@@ -517,18 +535,14 @@ void main() {
       playlist: playlist,
     );
 
-    await tester.pumpWidget(
-      HyperDownloadApp(
-        inspectionRepository: inspectRepo,
-        playlistSessionRepository: sessionRepo,
-        singleDownloadRepository: singleRepo,
-        playlistDownloadRepository: playlistRepo,
-        fileLauncher: launcher,
-        getInitialSharedUrl: () async => null,
-        sharedUrls: const Stream.empty(),
-      ),
+    await _pumpApp(
+      tester,
+      inspectRepo: inspectRepo,
+      sessionRepo: sessionRepo,
+      singleRepo: singleRepo,
+      playlistRepo: playlistRepo,
+      launcher: launcher,
     );
-    await tester.pumpAndSettle();
 
     await tester.enterText(
       find.byKey(const Key('url_input_field')),
