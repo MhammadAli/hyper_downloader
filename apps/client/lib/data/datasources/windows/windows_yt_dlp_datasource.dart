@@ -191,6 +191,8 @@ if not getattr(_curlcffi.CurlCFFIRH, "_hyperdl_ig_dns_patched", False):
     '--no-playlist',
     '--no-warnings',
     '--ignore-config',
+    '--encoding',
+    'utf-8',
     '--js-runtimes',
     'node:${paths.nodeExe}',
     '--ffmpeg-location',
@@ -205,6 +207,8 @@ if not getattr(_curlcffi.CurlCFFIRH, "_hyperdl_ig_dns_patched", False):
     '--yes-playlist',
     '--no-warnings',
     '--ignore-config',
+    '--encoding',
+    'utf-8',
     '--js-runtimes',
     'node:${paths.nodeExe}',
     '--ffmpeg-location',
@@ -241,11 +245,17 @@ if not getattr(_curlcffi.CurlCFFIRH, "_hyperdl_ig_dns_patched", False):
     StartDownloadRequest request,
     String outputTemplate,
     String infoJsonPath, {
-    required bool isInstagram,
+    bool isInstagram = false,
+    bool useMetaNetworkArgs = false,
   }) {
     final common = _buildDownloadCommonArgs(paths, request, outputTemplate);
-    if (isInstagram) {
-      common.addAll(['--socket-timeout', instagramSocketTimeoutSecs]);
+    if (isInstagram || useMetaNetworkArgs) {
+      final pluginDir = ensureInstagramPluginDir();
+      final prefix = <String>['--socket-timeout', instagramSocketTimeoutSecs];
+      if (pluginDir != null) {
+        prefix.addAll(['--no-plugin-dirs', '--plugin-dirs', pluginDir]);
+      }
+      common.insertAll(0, prefix);
     }
     common.addAll(['--load-info-json', infoJsonPath]);
     return common;
@@ -283,6 +293,8 @@ if not getattr(_curlcffi.CurlCFFIRH, "_hyperdl_ig_dns_patched", False):
       '--no-playlist',
       '--no-mtime',
       '--ignore-config',
+      '--encoding',
+      'utf-8',
       '--js-runtimes',
       'node:${paths.nodeExe}',
       '--ffmpeg-location',
@@ -330,10 +342,10 @@ if not getattr(_curlcffi.CurlCFFIRH, "_hyperdl_ig_dns_patched", False):
     final stderrBuf = StringBuffer();
 
     final stdoutSub = process.stdout
-        .transform(utf8.decoder)
+        .transform(const Utf8Decoder(allowMalformed: true))
         .listen(stdoutBuf.write);
     final stderrSub = process.stderr
-        .transform(utf8.decoder)
+        .transform(const Utf8Decoder(allowMalformed: true))
         .listen(stderrBuf.write);
 
     var timedOut = false;
@@ -369,8 +381,8 @@ if not getattr(_curlcffi.CurlCFFIRH, "_hyperdl_ig_dns_patched", False):
     var stderrText = stderrBuf.toString().trim();
     if (timedOut) {
       stderrText = stderrText.isEmpty
-          ? 'Timed out while contacting Instagram during analysis.'
-          : '$stderrText\nTimed out while contacting Instagram during analysis.';
+          ? 'Timed out while connecting during media analysis.'
+          : '$stderrText\nTimed out while connecting during media analysis.';
     }
 
     return YtDlpCommandResult(
@@ -439,7 +451,7 @@ if not getattr(_curlcffi.CurlCFFIRH, "_hyperdl_ig_dns_patched", False):
 
     final stderrLines = <String>[];
     final stderrDone = process.stderr
-        .transform(utf8.decoder)
+        .transform(const Utf8Decoder(allowMalformed: true))
         .transform(const LineSplitter())
         .listen(stderrLines.add)
         .asFuture<void>();
@@ -468,7 +480,7 @@ if not getattr(_curlcffi.CurlCFFIRH, "_hyperdl_ig_dns_patched", False):
     );
 
     final stdoutDone = process.stdout
-        .transform(utf8.decoder)
+        .transform(const Utf8Decoder(allowMalformed: true))
         .transform(const LineSplitter())
         .listen((rawLine) {
           if (isCancelRequested()) return;
@@ -507,14 +519,17 @@ if not getattr(_curlcffi.CurlCFFIRH, "_hyperdl_ig_dns_patched", False):
     var stderrText = stderrLines.join('\n');
     if (timedOut) {
       const marker =
-          'Timed out while connecting to Instagram before media transfer started.';
+          'Timed out while connecting before media transfer started.';
       stderrText = stderrText.isEmpty ? marker : '$stderrText\n$marker';
     }
 
     String? recordedOutputPath;
     try {
       if (await pathRecordFile.exists()) {
-        final content = await pathRecordFile.readAsString();
+        final content = utf8.decode(
+          await pathRecordFile.readAsBytes(),
+          allowMalformed: true,
+        );
         for (final line in content.split(RegExp(r'\r?\n')).reversed) {
           final t = line.trim();
           if (t.isNotEmpty) {
@@ -603,14 +618,14 @@ if not getattr(_curlcffi.CurlCFFIRH, "_hyperdl_ig_dns_patched", False):
         code != null &&
         code.isNotEmpty &&
         formatTag != null) {
-      final safeTitle = FilenameSanitizer.sanitizeWindowsFilename(title, 80);
+      final safeTitle = FilenameSanitizer.sanitizeWindowsFilename(title, 60);
       final safeCode = FilenameSanitizer.sanitizeWindowsFilename(code, 48);
       final baseStem = '$safeTitle [$safeCode] [$formatTag]';
       final uniqueStem = _pickNonCollidingStem(outputDir, baseStem);
       return '${outputDir.path}$sep$uniqueStem.%(ext)s';
     }
 
-    return '${outputDir.path}$sep%(title).100B [%(id)s] [%(format_id)s].%(ext)s';
+    return '${outputDir.path}$sep%(title).60B [%(id)s] [%(format_id)s].%(ext)s';
   }
 
   static String _pickNonCollidingStem(Directory outputDir, String baseStem) {

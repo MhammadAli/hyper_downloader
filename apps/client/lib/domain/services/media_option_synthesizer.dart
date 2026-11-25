@@ -70,7 +70,9 @@ class MediaOptionSynthesizer {
     List<RawFormatCandidate> candidates, {
     String? videoLanguage,
     bool isInstagram = false,
+    bool isFacebook = false,
   }) {
+    final isSingleSocialAudio = isInstagram || isFacebook;
     final audioCandidates = candidates
         .where((c) => c.format.streamKind == StreamKind.audioOnly)
         .toList(growable: false);
@@ -85,7 +87,7 @@ class MediaOptionSynthesizer {
     final AudioTrackMetadata? initialOriginalAudio;
     final AudioTrackMetadata? winningAudioMeta;
 
-    if (isInstagram) {
+    if (isSingleSocialAudio) {
       signals = const _AudioEnvironmentSignals();
       final selected = _selectPreferredAudioCandidate(
         audioCandidates,
@@ -123,11 +125,11 @@ class MediaOptionSynthesizer {
       audioCandidates,
       signals,
       winningAudioMeta,
-      isInstagram: isInstagram,
+      isInstagram: isSingleSocialAudio,
     );
 
     final originalAudio =
-        (isInstagram &&
+        (isSingleSocialAudio &&
             initialOriginalAudio == null &&
             videoOptions.isNotEmpty)
         ? _buildInstagramAudioMetadata(null)
@@ -1003,19 +1005,52 @@ class MediaOptionSynthesizer {
     }
 
     if (results.isEmpty && unknownResMuxed.isNotEmpty) {
-      final bestMuxed = _selectBestMuxedForHeight(
-        unknownResMuxed,
-        signals,
-        winningAudioMeta,
-      );
-      if (bestMuxed != null) {
-        results.add(
-          _buildUnknownResCombinedVideoOption(
-            bestMuxed,
-            winningAudioMeta,
-            isInstagram: isInstagram,
-          ),
-        );
+      final acceptableUnknown = unknownResMuxed
+          .where((m) => _isMuxedAudioAcceptable(m, signals, winningAudioMeta))
+          .toList(growable: false);
+      final hdMatches = acceptableUnknown
+          .where((m) => m.format.formatId.toLowerCase() == 'hd')
+          .toList(growable: false);
+      final sdMatches = acceptableUnknown
+          .where((m) => m.format.formatId.toLowerCase() == 'sd')
+          .toList(growable: false);
+
+      if (hdMatches.isNotEmpty || sdMatches.isNotEmpty) {
+        final bestHd = _maxByVideoComparison(hdMatches);
+        if (bestHd != null) {
+          results.add(
+            _buildUnknownResCombinedVideoOption(
+              bestHd,
+              winningAudioMeta,
+              isInstagram: isInstagram,
+              resolutionLabel: 'HD',
+              assumedHeight: 720,
+            ),
+          );
+        }
+        final bestSd = _maxByVideoComparison(sdMatches);
+        if (bestSd != null) {
+          results.add(
+            _buildUnknownResCombinedVideoOption(
+              bestSd,
+              winningAudioMeta,
+              isInstagram: isInstagram,
+              resolutionLabel: 'SD',
+              assumedHeight: 480,
+            ),
+          );
+        }
+      } else {
+        final bestMuxed = _maxByVideoComparison(acceptableUnknown);
+        if (bestMuxed != null) {
+          results.add(
+            _buildUnknownResCombinedVideoOption(
+              bestMuxed,
+              winningAudioMeta,
+              isInstagram: isInstagram,
+            ),
+          );
+        }
       }
     }
 
@@ -1104,10 +1139,22 @@ class MediaOptionSynthesizer {
     );
     if (sizeCmp != 0) return sizeCmp;
 
-    return (a.format.bitrateKbps ?? 0.0).compareTo(
+    final bitrateCmp = (a.format.bitrateKbps ?? 0.0).compareTo(
       b.format.bitrateKbps ?? 0.0,
     );
+    if (bitrateCmp != 0) return bitrateCmp;
+
+    final qualityRankA = _progressiveQualityTagRank(a.format.formatId);
+    final qualityRankB = _progressiveQualityTagRank(b.format.formatId);
+    return qualityRankA.compareTo(qualityRankB);
   }
+
+  static int _progressiveQualityTagRank(String formatId) =>
+      switch (formatId.toLowerCase()) {
+        'hd' => 2,
+        'sd' => 1,
+        _ => 0,
+      };
 
   static int _videoContainerCodecRank(RawFormatCandidate cand) {
     final isMp4 = cand.format.container.toLowerCase() == 'mp4';
@@ -1163,6 +1210,8 @@ class MediaOptionSynthesizer {
     RawFormatCandidate muxed,
     AudioTrackMetadata? winningAudioMeta, {
     required bool isInstagram,
+    String resolutionLabel = 'Standard',
+    int? assumedHeight,
   }) {
     final audioMeta =
         winningAudioMeta ??
@@ -1170,8 +1219,8 @@ class MediaOptionSynthesizer {
             ? _buildInstagramAudioMetadata(muxed)
             : _buildMuxedFallbackAudioMetadata(muxed));
     return VideoQualityOption(
-      resolution: 'Standard',
-      height: null,
+      resolution: resolutionLabel,
+      height: assumedHeight,
       fps: muxed.format.fps,
       container: muxed.format.container.toLowerCase(),
       displaySize: ByteFormatter.formatDisplaySize(

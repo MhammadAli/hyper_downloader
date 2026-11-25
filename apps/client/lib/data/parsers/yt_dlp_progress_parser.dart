@@ -117,6 +117,9 @@ abstract final class YtDlpProgressParser {
     if (line.startsWith('[Instagram] ')) {
       return const ParsedStageStatus('Resolving media...');
     }
+    if (line.toLowerCase().startsWith('[facebook')) {
+      return const ParsedStageStatus('Connecting to Facebook...');
+    }
     if (line.startsWith('[info] ') &&
         line.contains('Downloading') &&
         line.contains('format(s)')) {

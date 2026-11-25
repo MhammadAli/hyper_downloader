@@ -66,7 +66,12 @@ void main() {
       );
     });
 
-    test('dispatches unrecognized hosts to generic strategy and supports custom strategies', () {
+    test('dispatches built-in Facebook URLs, unrecognized hosts, and custom strategies', () {
+      final facebook = registry.classifyAndNormalize(
+        'https://www.facebook.com/watch/?v=1234567890',
+      );
+      expect(facebook.platformId, MediaPlatformId.facebook);
+
       final generic = registry.classifyAndNormalize(
         'https://www.tiktok.com/@user/video/1234567890',
       );

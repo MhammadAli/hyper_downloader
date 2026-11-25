@@ -64,11 +64,16 @@ class YtDlpJsonParser {
     final isInstagramPayload =
         (rawExtractor?.toLowerCase().startsWith('instagram') ?? false) ||
         (rawWebUrl != null && inferProviderFromUrl(rawWebUrl) == 'Instagram');
+    final isFacebookPayload =
+        (rawExtractor?.toLowerCase().startsWith('facebook') ?? false) ||
+        (rawWebUrl != null && inferProviderFromUrl(rawWebUrl) == 'Facebook');
 
     final rawFormats = obj['formats'];
     if (rawFormats is! List && obj['_type'] == 'playlist') {
       final msg = isInstagramPayload
           ? 'Instagram carousels and multi-item posts are not supported. Only individual public Reels are supported.'
+          : isFacebookPayload
+          ? 'Multi-video Facebook posts are not supported yet. Please open the individual video and paste its direct link.'
           : 'Playlist URLs are not supported in single-video inspection yet. Please enter a single video URL.';
       throw ParseException(msg);
     }
@@ -90,20 +95,23 @@ class YtDlpJsonParser {
     final rawProvider = rawExtractor ?? inferProviderFromUrl(webpageUrl);
     final providerName = _normalizeProviderName(rawProvider, webpageUrl);
     final isInstagram = providerName.toLowerCase() == 'instagram';
+    final isFacebook = providerName.toLowerCase() == 'facebook';
 
     final uploader =
         _nonEmptyStr(obj['uploader']) ??
         _nonEmptyStr(obj['channel']) ??
         _nonEmptyStr(obj['creator']) ??
-        (isInstagram ? _nonEmptyStr(obj['uploader_id']) : null);
+        ((isInstagram || isFacebook) ? _nonEmptyStr(obj['uploader_id']) : null);
 
-    final title =
-        _nonEmptyStr(obj['title']) ??
-        (isInstagram
-            ? (uploader != null
-                  ? 'Instagram Reel by $uploader'
-                  : 'Instagram Reel ($id)')
-            : id);
+    final rawTitle = _nonEmptyStr(obj['title']);
+    final title = _resolveMediaTitle(
+      rawTitle: rawTitle,
+      description: _nonEmptyStr(obj['description']),
+      id: id,
+      uploader: uploader,
+      isInstagram: isInstagram,
+      isFacebook: isFacebook,
+    );
 
     final durationSeconds =
         _asDouble(obj['duration']) ?? _asDouble(obj['duration_seconds']);
@@ -130,6 +138,7 @@ class YtDlpJsonParser {
       candidates,
       videoLanguage: videoLanguage,
       isInstagram: isInstagram,
+      isFacebook: isFacebook,
     );
 
     return MediaInspection(
@@ -222,6 +231,7 @@ class YtDlpJsonParser {
     return switch (strategy.displayName) {
       'YouTube' => 'YouTube',
       'Instagram' => 'Instagram',
+      'Facebook' => 'Facebook',
       _ => host,
     };
   }
@@ -288,12 +298,18 @@ class YtDlpJsonParser {
     final hasVideo = vcodec != null;
     final hasAudio =
         acodec != null || (audioExt != null && resolutionRaw == 'audio only');
+    final isKnownVideoContainer = const {
+      'mp4',
+      'webm',
+      'mkv',
+      'mov',
+    }.contains(container.toLowerCase());
     final isUnknownCodecMuxed =
         !vcodecExplicitNone &&
         !acodecExplicitNone &&
         vcodec == null &&
         acodec == null &&
-        videoExt != null &&
+        (videoExt != null || isKnownVideoContainer) &&
         resolutionRaw != 'audio only';
 
     if (!hasVideo && !hasAudio && !isUnknownCodecMuxed) return null;
@@ -462,7 +478,59 @@ class YtDlpJsonParser {
         inferProviderFromUrl(webpageUrl) == 'Instagram') {
       return 'Instagram';
     }
+    if (lower == 'facebook' ||
+        lower == 'facebookreel' ||
+        lower == 'facebookpluginsvideo' ||
+        lower == 'facebookredirecturl' ||
+        lower == 'facebookads' ||
+        inferProviderFromUrl(webpageUrl) == 'Facebook') {
+      return 'Facebook';
+    }
     return rawProvider;
+  }
+
+  static String _resolveMediaTitle({
+    required String? rawTitle,
+    required String? description,
+    required String id,
+    required String? uploader,
+    required bool isInstagram,
+    required bool isFacebook,
+  }) {
+    final isGenericFacebookTitle =
+        isFacebook &&
+        (rawTitle == null ||
+            rawTitle.toLowerCase() == 'facebook' ||
+            RegExp(
+              r'^facebook video #?\d*$',
+              caseSensitive: false,
+            ).hasMatch(rawTitle));
+
+    if (!isGenericFacebookTitle && rawTitle != null) {
+      return rawTitle;
+    }
+
+    if (isFacebook && description != null) {
+      for (final line in description.split(RegExp(r'\r?\n'))) {
+        final clean = line.trim();
+        if (clean.isNotEmpty) {
+          if (clean.runes.length <= 100) return clean;
+          return '${String.fromCharCodes(clean.runes.take(97)).trimRight()}...';
+        }
+      }
+    }
+
+    if (isInstagram) {
+      return uploader != null
+          ? 'Instagram Reel by $uploader'
+          : 'Instagram Reel ($id)';
+    }
+    if (isFacebook) {
+      return uploader != null
+          ? 'Facebook Video by $uploader'
+          : 'Facebook Video ($id)';
+    }
+    return rawTitle ?? id;
   }
 
   static (int?, FileSizeAccuracy) _resolveSizeAndAccuracy(
@@ -497,7 +565,9 @@ class YtDlpJsonParser {
 
   static String? _normalizeCodec(Object? val) {
     final raw = _nonEmptyStr(val);
-    if (raw == null || raw.toLowerCase() == 'none') return null;
+    if (raw == null) return null;
+    final lower = raw.toLowerCase();
+    if (lower == 'none' || lower == 'unknown') return null;
     return raw;
   }
 

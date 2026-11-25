@@ -1,4 +1,5 @@
 import 'package:hyper_download_client/core/error/app_exception.dart';
+import 'package:hyper_download_client/domain/platforms/facebook_platform_strategy.dart';
 import 'package:hyper_download_client/domain/platforms/generic_platform_strategy.dart';
 import 'package:hyper_download_client/domain/platforms/instagram_platform_strategy.dart';
 import 'package:hyper_download_client/domain/platforms/media_platform.dart';
@@ -15,7 +16,11 @@ class PlatformRegistry {
     this._fallback = const GenericPlatformStrategy(),
   }) : _strategies =
            strategies ??
-           const [YoutubePlatformStrategy(), InstagramPlatformStrategy()];
+           const [
+             YoutubePlatformStrategy(),
+             InstagramPlatformStrategy(),
+             FacebookPlatformStrategy(),
+           ];
 
   static String normalizeHost(String host) {
     var clean = host.trim().toLowerCase();

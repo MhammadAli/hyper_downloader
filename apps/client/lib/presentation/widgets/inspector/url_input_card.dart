@@ -42,9 +42,9 @@ class UrlInputCard extends StatelessWidget {
               onChanged: onUrlChanged,
               onSubmitted: (_) => onAnalyze(),
               decoration: InputDecoration(
-                labelText: 'Paste YouTube or Instagram Reel link',
+                labelText: 'Paste YouTube, Instagram, or Facebook link',
                 hintText:
-                    'YouTube video, Shorts, playlist, or Instagram Reel URL',
+                    'YouTube video/playlist, Instagram Reel, or Facebook video/Reel URL',
                 prefixIcon: Icon(Icons.link_rounded, color: scheme.secondary),
                 suffixIcon: hasUrlText && !isAnalyzing
                     ? IconButton(

@@ -86,6 +86,18 @@ class InstagramPlatformStrategy implements PlatformStrategy {
     }
 
     if (_containsAny(lower, const [
+      'brokenpipeerror',
+      'broken pipe',
+      'errno 22',
+      'errno 32',
+      'file name too long',
+      'no space left',
+      'permission denied',
+    ])) {
+      return 'Local file or stream error while saving media. Please check folder permissions and disk space, then try again.';
+    }
+
+    if (_containsAny(lower, const [
       '429',
       'rate-limit',
       'rate limit',

@@ -32,10 +32,8 @@ class _ActiveSingleJob {
 /// Windows implementation of [SingleDownloadRepository] managing a single active
 /// `yt-dlp.exe` transfer with Win32 Job Object cancel & `--continue` resume.
 class WindowsSingleDownloadRepositoryImpl implements SingleDownloadRepository {
-  static const Duration _instagramCachedFirstByteTimeout = Duration(
-    seconds: 45,
-  );
-  static const Duration _instagramLiveFirstByteTimeout = Duration(seconds: 110);
+  static const Duration _metaCachedFirstByteTimeout = Duration(seconds: 45);
+  static const Duration _metaLiveFirstByteTimeout = Duration(seconds: 110);
   static const Duration _cancelWaitTimeout = Duration(seconds: 5);
 
   final WindowsYtDlpDataSource _ytDlpDataSource;
@@ -169,7 +167,10 @@ class WindowsSingleDownloadRepositoryImpl implements SingleDownloadRepository {
     }
     final fid = request.selection.formatId?.trim();
     if (fid == null || fid.isEmpty) return false;
-    return _inspectionRepository.isRegisteredAudioOnlyFormat(request.url, fid) ||
+    return _inspectionRepository.isRegisteredAudioOnlyFormat(
+          request.url,
+          fid,
+        ) ||
         _inspectionRepository.isRegisteredAudioOnlyFormat(originalUrl, fid);
   }
 
@@ -188,17 +189,20 @@ class WindowsSingleDownloadRepositoryImpl implements SingleDownloadRepository {
     );
     _activeJob = job;
 
-    final hasCachedIgInfo =
-        platformId == MediaPlatformId.instagram &&
+    final isMetaPlatform =
+        platformId == MediaPlatformId.instagram ||
+        platformId == MediaPlatformId.facebook;
+    final hasCachedMetaInfo =
+        isMetaPlatform &&
         _inspectionRepository.getCachedRawJson(
               request.url,
-              isInstagram: true,
+              isShortLivedCdn: true,
             ) !=
             null;
 
-    final initialMsg =
-        (platformId == MediaPlatformId.instagram && !hasCachedIgInfo)
-        ? 'Connecting to Instagram...'
+    final strategy = _platformRegistry.strategyForId(platformId);
+    final initialMsg = (isMetaPlatform && !hasCachedMetaInfo)
+        ? 'Connecting to ${strategy.displayName}...'
         : 'Preparing download...';
     _emitAnalyzingStage(jobId, initialMsg);
 
@@ -212,13 +216,15 @@ class WindowsSingleDownloadRepositoryImpl implements SingleDownloadRepository {
     MediaPlatformId platformId,
   ) async {
     final jobStarted = DateTime.now();
-    final isInstagram = platformId == MediaPlatformId.instagram;
+    final isMetaPlatform =
+        platformId == MediaPlatformId.instagram ||
+        platformId == MediaPlatformId.facebook;
     final strategy = _platformRegistry.strategyForId(platformId);
 
     YtDlpDownloadAttemptResult? outcome;
     try {
-      outcome = isInstagram
-          ? await _executeInstagramDownload(job, paths, args)
+      outcome = isMetaPlatform
+          ? await _executeMetaDownload(job, paths, args, platformId)
           : await _executeStandardDownload(job, paths, args);
     } catch (err) {
       job.isRunning = false;
@@ -272,7 +278,7 @@ class WindowsSingleDownloadRepositoryImpl implements SingleDownloadRepository {
         totalBytes: outcome.lastTotal,
         isTotalEstimated: outcome.lastEstimated,
         outputPath: outcome.detectedOutputPath,
-        message: isInstagram
+        message: isMetaPlatform
             ? strategy.classifyError(outcome.stderrText)
             : 'Timed out before media transfer started.',
       );
@@ -310,7 +316,7 @@ class WindowsSingleDownloadRepositoryImpl implements SingleDownloadRepository {
         );
       }
     } else {
-      final msg = isInstagram
+      final msg = isMetaPlatform
           ? strategy.classifyError(outcome.stderrText)
           : (outcome.stderrText.trim().isEmpty
                 ? 'yt-dlp exited with code ${outcome.exitCode}'
@@ -330,15 +336,16 @@ class WindowsSingleDownloadRepositoryImpl implements SingleDownloadRepository {
     if (!job.done.isCompleted) job.done.complete();
   }
 
-  Future<YtDlpDownloadAttemptResult> _executeInstagramDownload(
+  Future<YtDlpDownloadAttemptResult> _executeMetaDownload(
     _ActiveSingleJob job,
     WindowsToolPaths paths,
     List<String> args,
+    MediaPlatformId platformId,
   ) async {
-    final strategy = _platformRegistry.strategyForId(MediaPlatformId.instagram);
+    final strategy = _platformRegistry.strategyForId(platformId);
     final cachedJson = _inspectionRepository.getCachedRawJson(
       job.request.url,
-      isInstagram: true,
+      isShortLivedCdn: true,
     );
 
     if (cachedJson != null) {
@@ -353,13 +360,13 @@ class WindowsSingleDownloadRepositoryImpl implements SingleDownloadRepository {
           job.request,
           job.outputTemplate,
           infoFile.path,
-          isInstagram: true,
+          useMetaNetworkArgs: true,
         );
         final res = await _runTrackedAttempt(
           job,
           paths,
           cachedArgs,
-          firstByteTimeout: _instagramCachedFirstByteTimeout,
+          firstByteTimeout: _metaCachedFirstByteTimeout,
         );
         if (res.succeeded || job.cancelRequested || res.lastDownloaded > 0) {
           return res;
@@ -381,13 +388,13 @@ class WindowsSingleDownloadRepositoryImpl implements SingleDownloadRepository {
       );
     }
 
-    _emitAnalyzingStage(job.jobId, 'Connecting to Instagram...');
+    _emitAnalyzingStage(job.jobId, 'Connecting to ${strategy.displayName}...');
     final liveArgs = _ytDlpDataSource.buildInstagramNetworkArgs(args);
     final firstLive = await _runTrackedAttempt(
       job,
       paths,
       liveArgs,
-      firstByteTimeout: _instagramLiveFirstByteTimeout,
+      firstByteTimeout: _metaLiveFirstByteTimeout,
     );
 
     if (!firstLive.succeeded &&
@@ -395,7 +402,10 @@ class WindowsSingleDownloadRepositoryImpl implements SingleDownloadRepository {
         firstLive.lastDownloaded == 0 &&
         !firstLive.timedOut &&
         strategy.isTransientError(firstLive.stderrText)) {
-      _emitAnalyzingStage(job.jobId, 'Retrying connection to Instagram...');
+      _emitAnalyzingStage(
+        job.jobId,
+        'Retrying connection to ${strategy.displayName}...',
+      );
       await Future.any([
         Future<void>.delayed(const Duration(milliseconds: 1500)),
         job.cancelSignal.future,
@@ -405,7 +415,7 @@ class WindowsSingleDownloadRepositoryImpl implements SingleDownloadRepository {
           job,
           paths,
           liveArgs,
-          firstByteTimeout: _instagramLiveFirstByteTimeout,
+          firstByteTimeout: _metaLiveFirstByteTimeout,
         );
       }
     }

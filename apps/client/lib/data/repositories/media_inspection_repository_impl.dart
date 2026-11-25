@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:hyper_download_client/core/error/app_exception.dart';
 import 'package:hyper_download_client/data/datasources/android/android_method_channel_datasource.dart';
+import 'package:hyper_download_client/data/datasources/windows/windows_tool_paths.dart';
 import 'package:hyper_download_client/data/datasources/windows/windows_yt_dlp_datasource.dart';
 import 'package:hyper_download_client/data/parsers/yt_dlp_json_parser.dart';
 import 'package:hyper_download_client/domain/entities/media_entities.dart';
@@ -30,8 +31,8 @@ class _CachedRawEntry {
 class MediaInspectionRepositoryImpl implements MediaInspectionRepository {
   static const int _rawCacheMaxEntries = 64;
   static const Duration _standardCacheTtl = Duration(minutes: 30);
-  static const Duration _instagramCacheTtl = Duration(minutes: 15);
-  static const Duration _instagramInspectTimeout = Duration(seconds: 120);
+  static const Duration _shortLivedCdnCacheTtl = Duration(minutes: 15);
+  static const Duration _metaInspectTimeout = Duration(seconds: 120);
   static const int _audioRegistryMaxKeys = 64;
 
   final PlatformRegistry _platformRegistry;
@@ -40,7 +41,8 @@ class MediaInspectionRepositoryImpl implements MediaInspectionRepository {
   final AndroidMethodChannelDataSource? _androidDataSource;
   final bool _isAndroid;
 
-  final Map<String, _CachedRawEntry> _rawCache = HashMap<String, _CachedRawEntry>();
+  final Map<String, _CachedRawEntry> _rawCache =
+      HashMap<String, _CachedRawEntry>();
   final Map<String, List<String>> _audioOnlyFormatsByUrl = {};
 
   MediaInspectionRepositoryImpl({
@@ -93,10 +95,16 @@ class MediaInspectionRepositoryImpl implements MediaInspectionRepository {
     return ids.contains(formatId.trim());
   }
 
-  String? getCachedRawJson(String url, {bool isInstagram = false}) {
+  String? getCachedRawJson(
+    String url, {
+    bool isInstagram = false,
+    bool isShortLivedCdn = false,
+  }) {
     final key = url.trim();
     if (key.isEmpty) return null;
-    final ttl = isInstagram ? _instagramCacheTtl : _standardCacheTtl;
+    final ttl = (isInstagram || isShortLivedCdn)
+        ? _shortLivedCdnCacheTtl
+        : _standardCacheTtl;
     final entry = _rawCache[key];
     if (entry == null) return null;
     if (DateTime.now().difference(entry.cachedAt) <= ttl) {
@@ -118,6 +126,8 @@ class MediaInspectionRepositoryImpl implements MediaInspectionRepository {
     NormalizedMediaUrl classified,
   ) async {
     final isInstagram = classified.platformId == MediaPlatformId.instagram;
+    final isFacebook = classified.platformId == MediaPlatformId.facebook;
+    final isShortLivedCdn = isInstagram || isFacebook;
     final String rawJson;
 
     if (_isAndroid) {
@@ -133,29 +143,47 @@ class MediaInspectionRepositoryImpl implements MediaInspectionRepository {
 
     try {
       final inspected = await _jsonParser.parseMediaInspectionAsync(rawJson);
-      _registerAudioOnlyFormatIds(
-        [classified.normalizedUrl, inspected.webpageUrl, inspected.id],
-        inspected.audioOptions.map((a) => a.formatId).toList(growable: false),
-      );
-      if (isInstagram) {
+      _registerAudioOnlyFormatIds([
+        classified.normalizedUrl,
+        inspected.webpageUrl,
+        inspected.id,
+      ], inspected.audioOptions.map((a) => a.formatId).toList(growable: false));
+      final cacheKeys = <String>{classified.normalizedUrl};
+      if (inspected.webpageUrl.trim().isNotEmpty) {
+        cacheKeys.add(inspected.webpageUrl.trim());
+        try {
+          cacheKeys.add(
+            _platformRegistry
+                .classifyAndNormalize(inspected.webpageUrl)
+                .normalizedUrl,
+          );
+        } catch (_) {}
+      }
+
+      if (isShortLivedCdn) {
         final cleaned = WindowsYtDlpDataSource.sanitizeInfoJsonForReuse(
           rawJson,
         );
         if (cleaned != null) {
-          _putRawCache(
-            classified.normalizedUrl,
-            cleaned,
-            ttl: _instagramCacheTtl,
-          );
+          for (final cacheKey in cacheKeys) {
+            _putRawCache(cacheKey, cleaned, ttl: _shortLivedCdnCacheTtl);
+          }
         }
       } else {
-        _putRawCache(classified.normalizedUrl, rawJson, ttl: _standardCacheTtl);
+        for (final cacheKey in cacheKeys) {
+          _putRawCache(cacheKey, rawJson, ttl: _standardCacheTtl);
+        }
       }
       return inspected;
     } on ParseException {
       if (isInstagram) {
         throw const ParseException(
           'Instagram returned an unsupported media format or incomplete response.',
+        );
+      }
+      if (isFacebook) {
+        throw const ParseException(
+          'Facebook returned an unsupported media format or incomplete response.',
         );
       }
       rethrow;
@@ -202,30 +230,54 @@ class MediaInspectionRepositoryImpl implements MediaInspectionRepository {
   ) async {
     final ytDlp = _windowsYtDlp!;
     final paths = ytDlp.resolveToolPaths();
-    final isInstagram = classified.platformId == MediaPlatformId.instagram;
+    final isMetaPlatform =
+        classified.platformId == MediaPlatformId.instagram ||
+        classified.platformId == MediaPlatformId.facebook;
     final strategy = _platformRegistry.strategyForId(classified.platformId);
-    final baseArgs = ytDlp.buildInspectArgs(paths, classified.normalizedUrl);
-    final args = isInstagram
-        ? ytDlp.buildInstagramNetworkArgs(baseArgs)
-        : baseArgs;
-    final timeout = isInstagram ? _instagramInspectTimeout : null;
+    final timeout = isMetaPlatform ? _metaInspectTimeout : null;
 
-    var output = await ytDlp.runInspectionCommand(
-      paths,
-      args,
+    var output = await _runSingleWindowsInspection(
+      ytDlp: ytDlp,
+      paths: paths,
+      url: classified.normalizedUrl,
+      useMetaNetworkArgs: isMetaPlatform,
       timeout: timeout,
     );
 
     if (!output.succeeded &&
-        isInstagram &&
+        isMetaPlatform &&
         !output.timedOut &&
         strategy.isTransientError(output.stderr)) {
       await Future<void>.delayed(const Duration(milliseconds: 1500));
-      output = await ytDlp.runInspectionCommand(paths, args, timeout: timeout);
+      output = await _runSingleWindowsInspection(
+        ytDlp: ytDlp,
+        paths: paths,
+        url: classified.normalizedUrl,
+        useMetaNetworkArgs: true,
+        timeout: timeout,
+      );
+    }
+
+    if (!output.succeeded &&
+        classified.platformId == MediaPlatformId.facebook &&
+        !output.timedOut &&
+        _shouldTryFacebookCanonicalFallback(output.stderr)) {
+      for (final fallbackUrl in _facebookFallbackUrls(classified)) {
+        final retryOutput = await _runSingleWindowsInspection(
+          ytDlp: ytDlp,
+          paths: paths,
+          url: fallbackUrl,
+          useMetaNetworkArgs: true,
+          timeout: timeout,
+        );
+        if (retryOutput.succeeded) {
+          return retryOutput.stdout;
+        }
+      }
     }
 
     if (!output.succeeded) {
-      if (isInstagram) {
+      if (isMetaPlatform) {
         throw ProcessExecutionException(
           strategy.classifyError(output.stderr),
           exitCode: output.exitCode,
@@ -242,11 +294,39 @@ class MediaInspectionRepositoryImpl implements MediaInspectionRepository {
     return output.stdout;
   }
 
-  void _putRawCache(
-    String url,
-    String rawJson, {
-    required Duration ttl,
+  Future<YtDlpCommandResult> _runSingleWindowsInspection({
+    required WindowsYtDlpDataSource ytDlp,
+    required WindowsToolPaths paths,
+    required String url,
+    required bool useMetaNetworkArgs,
+    required Duration? timeout,
   }) {
+    final baseArgs = ytDlp.buildInspectArgs(paths, url);
+    final args = useMetaNetworkArgs
+        ? ytDlp.buildInstagramNetworkArgs(baseArgs)
+        : baseArgs;
+    return ytDlp.runInspectionCommand(paths, args, timeout: timeout);
+  }
+
+  static bool _shouldTryFacebookCanonicalFallback(String stderrText) {
+    final lower = stderrText.toLowerCase();
+    return lower.contains('no video formats') ||
+        lower.contains('cannot parse data') ||
+        lower.contains('unable to extract');
+  }
+
+  static List<String> _facebookFallbackUrls(NormalizedMediaUrl classified) {
+    final code = classified.shortcode?.trim();
+    if (code == null || !RegExp(r'^\d{6,}$').hasMatch(code)) {
+      return const [];
+    }
+    return [
+      'https://www.facebook.com/watch/?v=$code',
+      'https://www.facebook.com/video/video.php?v=$code',
+    ].where((url) => url != classified.normalizedUrl).toList(growable: false);
+  }
+
+  void _putRawCache(String url, String rawJson, {required Duration ttl}) {
     final key = url.trim();
     if (key.isEmpty || rawJson.trim().isEmpty) return;
     final now = DateTime.now();
