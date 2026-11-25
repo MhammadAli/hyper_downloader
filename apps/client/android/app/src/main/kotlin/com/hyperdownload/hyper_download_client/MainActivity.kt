@@ -124,6 +124,7 @@ class MainActivity : FlutterActivity() {
                 val url = requireArg(call, result, "url") ?: return
                 val isPlaylist = call.argument<Boolean>("isPlaylist") ?: false
                 val isInstagram = call.argument<Boolean>("isInstagram") ?: false
+                val isFacebook = call.argument<Boolean>("isFacebook") ?: false
                 dispatchAsync(result, "EXTRACT_RAW_INFO_FAILED") {
                     unwrapEnvelopeResult(
                         AndroidDownloadEngine.extractRawInfo(
@@ -131,6 +132,7 @@ class MainActivity : FlutterActivity() {
                             url,
                             isPlaylist,
                             isInstagram,
+                            isFacebook,
                         ),
                     )
                 }
@@ -371,6 +373,7 @@ class MainActivity : FlutterActivity() {
                         testUrl,
                         isPlaylist = false,
                         isInstagram = false,
+                        isFacebook = false,
                     )
                     val elapsedMs = System.currentTimeMillis() - t0
                     val envelope = JSONObject(inspectJson)

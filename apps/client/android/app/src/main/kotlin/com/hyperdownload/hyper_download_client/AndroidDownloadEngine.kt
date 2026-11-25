@@ -165,6 +165,7 @@ object AndroidDownloadEngine {
         url: String,
         isPlaylist: Boolean,
         isInstagram: Boolean,
+        isFacebook: Boolean = false,
     ): String {
         val appCtx = context.applicationContext
         return workerModule(appCtx)
@@ -176,6 +177,7 @@ object AndroidDownloadEngine {
                 cacheDir(appCtx),
                 isPlaylist,
                 isInstagram,
+                isFacebook,
                 Build.VERSION.SDK_INT,
             )
             .toString()

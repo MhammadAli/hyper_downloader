@@ -37,11 +37,13 @@ class AndroidMethodChannelDataSource {
     required String url,
     required bool isPlaylist,
     required bool isInstagram,
+    bool isFacebook = false,
   }) {
     return _invokeString('extractRawInfo', {
       'url': url,
       'isPlaylist': isPlaylist,
       'isInstagram': isInstagram,
+      'isFacebook': isFacebook,
     });
   }
 

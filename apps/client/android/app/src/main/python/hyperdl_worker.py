@@ -195,6 +195,49 @@ def _is_instagram_url(url: str) -> bool:
         return False
 
 
+def _is_facebook_url(url: str) -> bool:
+    try:
+        host = (urllib.parse.urlparse(url.strip()).hostname or "").lower().rstrip(".")
+        return (
+            host == "facebook.com"
+            or host.endswith(".facebook.com")
+            or host == "fb.watch"
+            or host.endswith(".fb.watch")
+            or host == "fb.com"
+            or host.endswith(".fb.com")
+        )
+    except Exception:
+        return False
+
+
+def _extract_facebook_numeric_id(url: str) -> str:
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+        qs = urllib.parse.parse_qs(parsed.query)
+        for key in ("v", "story_fbid"):
+            val = (qs.get(key) or [""])[0].strip()
+            if val.isdigit() and len(val) >= 6:
+                return val
+        for seg in reversed([s for s in parsed.path.split("/") if s]):
+            if seg.isdigit() and len(seg) >= 6:
+                return seg
+    except Exception:
+        pass
+    return ""
+
+
+def _facebook_fallback_urls(url: str) -> list:
+    vid = _extract_facebook_numeric_id(url)
+    if not vid:
+        return []
+    norm = url.strip()
+    candidates = [
+        f"https://www.facebook.com/watch/?v={vid}",
+        f"https://www.facebook.com/video/video.php?v={vid}",
+    ]
+    return [c for c in candidates if c != norm]
+
+
 def _base_ydl_opts(bins: dict, bin_dir: str, cache_dir: str) -> dict:
     if cache_dir:
         os.makedirs(cache_dir, exist_ok=True)
@@ -237,9 +280,19 @@ def _raw_cache_keys(url: str, info_dict=None, video_id=None):
         wp = str(info_dict.get("webpage_url") or "").strip()
         if wp and wp != norm_url:
             keys.append(f"url:{wp}")
+        extractor = str(info_dict.get("extractor_key") or info_dict.get("extractor") or "").lower()
         info_id = str(info_dict.get("id") or "").strip()
         if info_id:
             keys.append(f"id:{info_id}")
+            if "facebook" in extractor or _is_facebook_url(norm_url) or _is_facebook_url(wp):
+                if info_id.isdigit() and len(info_id) >= 6:
+                    for fb_canon in (
+                        f"https://www.facebook.com/watch/?v={info_id}",
+                        f"https://www.facebook.com/reel/{info_id}/",
+                    ):
+                        fb_key = f"url:{fb_canon}"
+                        if fb_key not in keys:
+                            keys.append(fb_key)
     if video_id and str(video_id).strip():
         vid_key = f"id:{str(video_id).strip()}"
         if vid_key not in keys:
@@ -332,7 +385,7 @@ def _redact_sensitive_diagnostics(raw: str) -> str:
         raw,
     )
     return re.sub(
-        r"(?i)((?:sessionid|csrftoken|ds_user_id|oh|_nc_ohc)=)[^&;\"')\s\]]+",
+        r"(?i)((?:sessionid|csrftoken|ds_user_id|c_user|xs|fr|datr|oh|_nc_ohc)=)[^&;\"')\s\]]+",
         r"\1[REDACTED]",
         text,
     )
@@ -474,6 +527,139 @@ def _classify_instagram_error(raw_error: str) -> dict:
     }
 
 
+def _classify_facebook_error(raw_error: str) -> dict:
+    text = str(raw_error or "").strip()
+    lower = text.lower()
+    if any(
+        t in lower
+        for t in ("ffmpeg", "ffprobe", "postprocessing", "error merging", "[merger]", "muxing", "moov atom")
+    ):
+        msg = "Failed to process Facebook video and audio streams with FFmpeg."
+    elif any(
+        t in lower
+        for t in ("brokenpipeerror", "broken pipe", "errno 22", "errno 32", "file name too long", "no space left", "permission denied")
+    ):
+        msg = "Local file or stream error while saving media. Please check folder permissions and disk space, then try again."
+    elif any(
+        t in lower
+        for t in ("age-restricted", "age restricted", "age gate", "18+", "mature content", "inappropriate for some users")
+    ):
+        msg = "This Facebook video is age-restricted and requires an authenticated account."
+    elif any(
+        t in lower
+        for t in (
+            "login required",
+            "you must log in",
+            "must log in to continue",
+            "logged-in",
+            "need to log in",
+            "sign in",
+            "use --cookies",
+            "cookies are needed",
+            "cookies-from-browser",
+            "registered users",
+            "this video is private",
+            "private video",
+            "content isn't available right now",
+            "content is not available right now",
+        )
+    ):
+        msg = "This Facebook video is private or requires login. Only public Facebook videos and Reels are supported."
+    elif any(
+        t in lower
+        for t in ("429", "too many requests", "rate limit", "rate-limit", "please wait a few minutes")
+    ):
+        msg = "Facebook temporarily rate-limited requests. Please wait a few minutes and try again."
+    elif any(
+        t in lower
+        for t in (
+            "http error 404",
+            "404: not found",
+            "not found",
+            "does not exist",
+            "has been deleted",
+            "been deleted",
+            "removed",
+            "expired",
+            "no longer available",
+            "no video formats found",
+            "there's no video",
+            "no video on this",
+        )
+    ):
+        msg = "This Facebook video is unavailable, has been deleted, or the post does not contain a playable video."
+    elif any(
+        t in lower
+        for t in (
+            "cannot parse data",
+            "unable to extract",
+            "empty media response",
+            "checkpoint",
+            "challenge_required",
+            "http error 403",
+            "403",
+            "blocked",
+            "automated",
+        )
+    ):
+        msg = "Facebook temporarily restricted or changed this page response. Please try again later."
+    elif "before media transfer started" in lower or any(
+        t in lower
+        for t in (
+            "timed out",
+            "timeout",
+            "could not resolve",
+            "curl: (6)",
+            "curl: (7)",
+            "curl: (28)",
+            "transporterror",
+            "urlopen",
+            "gaierror",
+            "name or service not known",
+            "temporary failure in name resolution",
+            "nodename nor servname",
+            "remote end closed",
+            "incompleteread",
+            "eof occurred",
+            "connection",
+            "network",
+            "ssl",
+            "tls",
+            "dns",
+            "reset by peer",
+        )
+    ):
+        msg = "Network error or timeout while contacting Facebook. Check your internet connection and try again."
+    else:
+        msg = "Facebook extraction failed. Please verify the video or Reel is public and try again."
+
+    is_transient = any(
+        t in lower
+        for t in (
+            "curl: (6)",
+            "curl: (7)",
+            "curl: (28)",
+            "transporterror",
+            "urlopen",
+            "gaierror",
+            "temporary failure in name resolution",
+            "connection reset",
+            "remote end closed",
+            "incompleteread",
+            "eof occurred",
+            "unexpected eof",
+            "timed out",
+            "could not resolve",
+            "failed to connect",
+        )
+    )
+    return {
+        "user_message": msg,
+        "redacted_diagnostic": _redact_sensitive_diagnostics(text)[:400],
+        "is_transient": is_transient,
+    }
+
+
 class _QuietCaptureLogger:
     """Per-job yt-dlp logger that captures warnings/errors without touching global state."""
 
@@ -517,6 +703,8 @@ class _WorkerJobLogger:
             self.on_stage("Connecting to Instagram...")
         elif line.startswith("[Instagram] "):
             self.on_stage("Resolving media...")
+        elif line.lower().startswith("[facebook"):
+            self.on_stage("Connecting to Facebook...")
         elif line.startswith("[info] ") and "Downloading" in line and "format(s)" in line:
             self.on_stage("Resolving media...")
         elif line.startswith("[download] Destination: "):
@@ -567,6 +755,7 @@ def run_diagnostics(native_lib_dir: str, bin_dir: str) -> str:
         "request_handlers": [],
         "impersonate_handlers": [],
         "instagram_extractor_available": False,
+        "facebook_extractor_available": False,
         "android_dns_ok": False,
         "android_dns_ms": None,
         "android_dns_count": 0,
@@ -660,6 +849,13 @@ def run_diagnostics(native_lib_dir: str, bin_dir: str) -> str:
             report["instagram_extractor_available"] = True
         except Exception:
             report["instagram_extractor_available"] = False
+
+        try:
+            from yt_dlp.extractor import FacebookIE, FacebookReelIE  # noqa: F401
+
+            report["facebook_extractor_available"] = True
+        except Exception:
+            report["facebook_extractor_available"] = False
 
         try:
             dns_t0 = time.monotonic()
@@ -959,12 +1155,17 @@ def _extract_raw_info_dict(
     cache_dir: str = "",
     is_playlist: bool = False,
     is_instagram: bool = False,
+    is_facebook: bool = False,
     android_sdk_int: int = 0,
 ) -> dict:
     _configure_tls_env()
     bins = ensure_bin_symlinks(native_lib_dir, bin_dir)
     target_url = url.strip()
     ig_mode = bool(is_instagram or _is_instagram_url(target_url))
+    fb_mode = bool(is_facebook or _is_facebook_url(target_url))
+    meta_mode = ig_mode or fb_mode
+    classify_fn = _classify_facebook_error if fb_mode else _classify_instagram_error
+    platform_label = "Facebook" if fb_mode else "Instagram"
 
     ydl_opts = _base_ydl_opts(bins, bin_dir, cache_dir)
     if is_playlist:
@@ -980,7 +1181,7 @@ def _extract_raw_info_dict(
 
     ydl_opts["noplaylist"] = True
     capture_logger = None
-    if ig_mode:
+    if meta_mode:
         ydl_opts["socket_timeout"] = _INSTAGRAM_SOCKET_TIMEOUT_SECS
         capture_logger = _QuietCaptureLogger()
         ydl_opts["logger"] = capture_logger
@@ -988,7 +1189,7 @@ def _extract_raw_info_dict(
     t0 = time.monotonic()
     last_exc = None
     sanitized = None
-    max_attempts = 2 if ig_mode else 1
+    max_attempts = 2 if meta_mode else 1
     for attempt in range(1, max_attempts + 1):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -998,11 +1199,11 @@ def _extract_raw_info_dict(
             break
         except Exception as exc:
             last_exc = exc
-            if ig_mode and attempt < max_attempts:
+            if meta_mode and attempt < max_attempts:
                 combined_err = "\n".join(
                     (capture_logger.messages if capture_logger else []) + [str(exc)]
                 )
-                classified_err = _classify_instagram_error(combined_err)
+                classified_err = classify_fn(combined_err)
                 if classified_err.get("is_transient"):
                     if capture_logger:
                         capture_logger.messages.clear()
@@ -1010,14 +1211,34 @@ def _extract_raw_info_dict(
                     continue
             break
 
+    if last_exc is not None and fb_mode:
+        combined_err = "\n".join(
+            (capture_logger.messages if capture_logger else []) + [str(last_exc)]
+        ).lower()
+        if any(
+            marker in combined_err
+            for marker in ("no video formats", "cannot parse data", "unable to extract")
+        ):
+            for fallback_url in _facebook_fallback_urls(target_url):
+                try:
+                    if capture_logger:
+                        capture_logger.messages.clear()
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(fallback_url, download=False)
+                        sanitized = ydl.sanitize_info(info)
+                    last_exc = None
+                    break
+                except Exception as fb_exc:
+                    last_exc = fb_exc
+
     if last_exc is not None:
-        if ig_mode:
+        if meta_mode:
             combined_err = "\n".join(
                 (capture_logger.messages if capture_logger else []) + [str(last_exc)]
             )
-            classified_err = _classify_instagram_error(combined_err)
+            classified_err = classify_fn(combined_err)
             sys.stderr.write(
-                f"[hyperdl][diag] Android Instagram inspection failed ({time.monotonic() - t0:.2f}s): "
+                f"[hyperdl][diag] Android {platform_label} inspection failed ({time.monotonic() - t0:.2f}s): "
                 f"{classified_err.get('redacted_diagnostic', '')}\n"
             )
             return {"error": classified_err["user_message"]}
@@ -1025,12 +1246,12 @@ def _extract_raw_info_dict(
 
     sanitized_for_parse = (
         _adapt_instagram_formats_for_android_sdk(sanitized, android_sdk_int)
-        if ig_mode
+        if meta_mode
         else sanitized
     )
     ttl = (
         _INSTAGRAM_RAW_INFO_CACHE_TTL_SECS
-        if ig_mode
+        if meta_mode
         else _RAW_INFO_CACHE_TTL_SECS
     )
     _raw_cache_put(sanitized, target_url, ttl_secs=ttl)
@@ -1045,6 +1266,7 @@ def extract_raw_info(
     cache_dir: str = "",
     is_playlist: bool = False,
     is_instagram: bool = False,
+    is_facebook: bool = False,
     android_sdk_int: int = 0,
 ) -> str:
     """Extracts raw sanitized yt-dlp info JSON for Dart parsing & format synthesis."""
@@ -1055,6 +1277,7 @@ def extract_raw_info(
         cache_dir=cache_dir,
         is_playlist=bool(is_playlist),
         is_instagram=bool(is_instagram),
+        is_facebook=bool(is_facebook),
         android_sdk_int=int(android_sdk_int or 0),
     )
     if "error" in res:
@@ -1081,6 +1304,7 @@ def inspect_media_cached(
         cache_dir=cache_dir,
         is_playlist=False,
         is_instagram=_is_instagram_url(url),
+        is_facebook=_is_facebook_url(url),
         android_sdk_int=int(android_sdk_int or 0),
     )
     return json.dumps(res)
@@ -1240,7 +1464,35 @@ def select_playlist_item_option(
                 candidates.append((h, best_m, None, container, True))
 
         if not candidates:
-            return json.dumps({"error": "No playable Video with Sound formats available for this item."})
+            unknown_muxed = [
+                f
+                for f in formats
+                if not _is_audio_only_format(f)
+                and str(f.get("vcodec") or "").lower() != "none"
+                and str(f.get("acodec") or "").lower() != "none"
+                and str(f.get("ext") or "").lower() in ("mp4", "webm", "mkv", "mov")
+            ]
+            if not unknown_muxed:
+                return json.dumps({"error": "No playable Video with Sound formats available for this item."})
+            best_unknown = max(
+                unknown_muxed,
+                key=lambda f: (
+                    2 if str(f.get("format_id") or "").lower() == "hd"
+                    else (1 if str(f.get("format_id") or "").lower() == "sd" else 0),
+                    float(f.get("tbr") or 0),
+                ),
+            )
+            fid = str(best_unknown["format_id"])
+            container = str(best_unknown.get("ext") or "mp4").lower()
+            res_tag = "HD" if fid.lower() == "hd" else ("SD" if fid.lower() == "sd" else "Standard")
+            return json.dumps({
+                "ok": {
+                    "selection": {"kind": "Single", "format_id": fid},
+                    "quality_label": f"{res_tag} {container.upper()}",
+                    "container": container,
+                    "audio_language": None,
+                }
+            })
 
         chosen = next((c for c in candidates if c[0] <= max_h), candidates[-1])
         h, v_fmt, a_fmt, container, is_muxed = chosen
@@ -1340,6 +1592,7 @@ def _run_download_once(
     progress_cb,
     cached_info=None,
     is_instagram: bool = False,
+    is_facebook: bool = False,
 ) -> dict:
     _ensure_popen_tracker()
     _configure_tls_env()
@@ -1484,7 +1737,9 @@ def _run_download_once(
                 message=f"Running {pp} with FFmpeg...",
             )
 
-    job_logger = _WorkerJobLogger(job_id, is_instagram, _emit_stage)
+    meta_mode = is_instagram or is_facebook
+    platform_label = "Facebook" if is_facebook else "Instagram"
+    job_logger = _WorkerJobLogger(job_id, meta_mode, _emit_stage)
     ydl_opts = _base_ydl_opts(bins, bin_dir, cache_dir)
     ydl_opts.update(
         {
@@ -1499,15 +1754,15 @@ def _run_download_once(
             "logger": job_logger,
         }
     )
-    if is_instagram:
+    if meta_mode:
         ydl_opts["socket_timeout"] = _INSTAGRAM_SOCKET_TIMEOUT_SECS
     if merge_container:
         ydl_opts["merge_output_format"] = merge_container
 
     if cached_info is None:
         _emit_stage(
-            "Connecting to Instagram..."
-            if is_instagram
+            f"Connecting to {platform_label}..."
+            if meta_mode
             else "Preparing yt-dlp download..."
         )
 
@@ -1601,13 +1856,25 @@ def execute_single_download(
     url = str(req["url"])
     selection = req["selection"]
     outtmpl = req.get("output_template") or os.path.join(
-        staging_dir, "%(title).100B [%(id)s] [%(format_id)s].%(ext)s"
+        staging_dir, "%(title).60B [%(id)s] [%(format_id)s].%(ext)s"
     )
 
     normalized_url = url.strip()
     is_instagram = _is_instagram_url(normalized_url)
+    is_facebook = _is_facebook_url(normalized_url)
+    meta_mode = is_instagram or is_facebook
+    platform_label = "Facebook" if is_facebook else "Instagram"
+    classify_fn = _classify_facebook_error if is_facebook else _classify_instagram_error
 
-    cached_raw = _raw_cache_get(normalized_url) or _raw_cache_get(url)
+    cached_raw = (
+        _raw_cache_get(normalized_url)
+        or _raw_cache_get(url)
+        or (
+            _raw_cache_get("", video_id=_extract_facebook_numeric_id(normalized_url))
+            if is_facebook
+            else None
+        )
+    )
     res = _run_download_once(
         job_id,
         normalized_url,
@@ -1620,9 +1887,10 @@ def execute_single_download(
         progress_cb,
         cached_info=cached_raw,
         is_instagram=is_instagram,
+        is_facebook=is_facebook,
     )
     if "error" in res and not _is_job_cancelled(job_id):
-        if is_instagram:
+        if meta_mode:
             if cached_raw is not None and int(res.get("downloaded_bytes") or 0) == 0:
                 _raw_cache_evict(normalized_url, cached_raw.get("id"))
                 _raw_cache_evict(url, cached_raw.get("id"))
@@ -1639,7 +1907,7 @@ def execute_single_download(
                                 "speed_bytes_per_sec": None,
                                 "eta_seconds": None,
                                 "output_path": None,
-                                "message": "Connecting to Instagram...",
+                                "message": f"Connecting to {platform_label}...",
                             }
                         ),
                     )
@@ -1654,14 +1922,15 @@ def execute_single_download(
                     cache_dir,
                     progress_cb,
                     cached_info=None,
-                    is_instagram=True,
+                    is_instagram=is_instagram,
+                    is_facebook=is_facebook,
                 )
             if (
                 "error" in res
                 and int(res.get("downloaded_bytes") or 0) == 0
                 and not _is_job_cancelled(job_id)
             ):
-                classified_err = _classify_instagram_error(res["error"])
+                classified_err = classify_fn(res["error"])
                 if classified_err.get("is_transient"):
                     if progress_cb is not None:
                         _emit_cb(
@@ -1676,7 +1945,7 @@ def execute_single_download(
                                     "speed_bytes_per_sec": None,
                                     "eta_seconds": None,
                                     "output_path": None,
-                                    "message": "Retrying connection to Instagram...",
+                                    "message": f"Retrying connection to {platform_label}...",
                                 }
                             ),
                         )
@@ -1693,12 +1962,13 @@ def execute_single_download(
                             cache_dir,
                             progress_cb,
                             cached_info=None,
-                            is_instagram=True,
+                            is_instagram=is_instagram,
+                            is_facebook=is_facebook,
                         )
             if "error" in res and not _is_job_cancelled(job_id):
-                classified_err = _classify_instagram_error(res["error"])
+                classified_err = classify_fn(res["error"])
                 sys.stderr.write(
-                    f"[hyperdl][diag] Android Instagram download failed: "
+                    f"[hyperdl][diag] Android {platform_label} download failed: "
                     f"{classified_err.get('redacted_diagnostic', '')}\n"
                 )
                 res["error"] = classified_err["user_message"]
@@ -1718,6 +1988,7 @@ def execute_single_download(
                     progress_cb,
                     cached_info=None,
                     is_instagram=False,
+                    is_facebook=False,
                 )
             if (
                 "error" in res
@@ -1738,5 +2009,6 @@ def execute_single_download(
                         progress_cb,
                         cached_info=None,
                         is_instagram=False,
+                        is_facebook=False,
                     )
     return json.dumps(res)

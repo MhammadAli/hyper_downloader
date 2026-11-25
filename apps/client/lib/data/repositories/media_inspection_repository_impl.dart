@@ -136,6 +136,7 @@ class MediaInspectionRepositoryImpl implements MediaInspectionRepository {
         url: classified.normalizedUrl,
         isPlaylist: false,
         isInstagram: isInstagram,
+        isFacebook: isFacebook,
       );
     } else {
       rawJson = await _extractWindowsSingleMediaJson(classified);

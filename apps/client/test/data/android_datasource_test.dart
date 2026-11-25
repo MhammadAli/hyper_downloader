@@ -6,7 +6,10 @@ import 'package:hyper_download_client/core/error/app_exception.dart';
 import 'package:hyper_download_client/data/datasources/android/android_file_launcher_datasource.dart';
 import 'package:hyper_download_client/data/datasources/android/android_method_channel_datasource.dart';
 import 'package:hyper_download_client/data/datasources/android/android_wire_codec.dart';
+import 'package:hyper_download_client/data/repositories/android_single_download_repository_impl.dart';
+import 'package:hyper_download_client/data/repositories/media_inspection_repository_impl.dart';
 import 'package:hyper_download_client/domain/entities/download_entities.dart';
+import 'package:hyper_download_client/domain/entities/media_entities.dart';
 import 'package:hyper_download_client/domain/entities/playlist_entities.dart';
 
 void main() {
@@ -54,6 +57,30 @@ void main() {
         'url': 'https://www.instagram.com/reel/reel1/',
         'isPlaylist': false,
         'isInstagram': true,
+        'isFacebook': false,
+      });
+    });
+
+    test('invokes extractRawInfo with isFacebook: true when requested', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(methodChannel, (call) async {
+            recordedCalls.add(call);
+            return '{"id":"4595374484059655","formats":[]}';
+          });
+
+      await dataSource.extractRawInfo(
+        url: 'https://www.facebook.com/reel/4595374484059655/',
+        isPlaylist: false,
+        isInstagram: false,
+        isFacebook: true,
+      );
+
+      expect(recordedCalls.single.method, 'extractRawInfo');
+      expect(recordedCalls.single.arguments, {
+        'url': 'https://www.facebook.com/reel/4595374484059655/',
+        'isPlaylist': false,
+        'isInstagram': false,
+        'isFacebook': true,
       });
     });
 
@@ -139,6 +166,73 @@ void main() {
       expect(
         recordedCalls.map((c) => c.method).toList(),
         ['openFile', 'revealInFolder', 'shareFile'],
+      );
+    });
+
+    test('MediaInspectionRepositoryImpl & AndroidSingleDownloadRepositoryImpl normalize Facebook URLs', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(methodChannel, (call) async {
+            recordedCalls.add(call);
+            if (call.method == 'extractRawInfo') {
+              return jsonEncode({
+                'id': '4595374484059655',
+                'title': 'Facebook',
+                'description': 'Public Facebook Reel on Android',
+                'uploader': 'Deepinside',
+                'webpage_url':
+                    'https://m.facebook.com/watch/?v=4595374484059655&_rdr',
+                'extractor_key': 'Facebook',
+                'formats': [
+                  {'format_id': 'sd', 'ext': 'mp4'},
+                  {'format_id': 'hd', 'ext': 'mp4'},
+                ],
+              });
+            }
+            if (call.method == 'startDownload') {
+              return 'android-fb-job-1';
+            }
+            return null;
+          });
+
+      final inspectRepo = MediaInspectionRepositoryImpl(
+        androidDataSource: dataSource,
+        isAndroidOverride: true,
+      );
+      final singleRepo = AndroidSingleDownloadRepositoryImpl(dataSource);
+
+      final result = await inspectRepo.inspectUrl(
+        'https://m.facebook.com/reel/4595374484059655/?mibextid=abc',
+      );
+      expect(result.kind, InspectionTargetKind.singleVideo);
+      expect(result.video?.providerName, 'Facebook');
+      expect(result.video?.title, 'Public Facebook Reel on Android');
+      expect(result.video?.videoOptions.first.resolution, 'HD');
+
+      final extractArgs = recordedCalls.first.arguments as Map;
+      expect(extractArgs['isFacebook'], isTrue);
+      expect(extractArgs['isInstagram'], isFalse);
+      expect(
+        extractArgs['url'],
+        'https://www.facebook.com/reel/4595374484059655/',
+      );
+
+      final jobId = await singleRepo.startDownload(
+        StartDownloadRequest(
+          url: result.video!.webpageUrl,
+          title: result.video!.title,
+          selection: DownloadFormatSelection.single(
+            result.video!.videoOptions.first.videoFormatId,
+          ),
+        ),
+      );
+      expect(jobId, 'android-fb-job-1');
+
+      final startArgs = recordedCalls.last.arguments as Map;
+      final requestMap =
+          jsonDecode(startArgs['requestJson'] as String) as Map<String, dynamic>;
+      expect(
+        requestMap['url'],
+        'https://www.facebook.com/watch/?v=4595374484059655',
       );
     });
   });
